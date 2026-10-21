@@ -1,0 +1,23 @@
+services:
+  svn-desk:
+    build: .
+    ports:
+      - "127.0.0.1:${APP_PORT:-50001}:3000"
+    environment:
+      SVN_DESK_DATA_DIR: /app/data
+    volumes:
+      - svn-desk-data:/app/data
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  svn-desk-data:

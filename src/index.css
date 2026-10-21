@@ -1,0 +1,61 @@
+:root {
+  font-family: 'IBM Plex Sans', 'Avenir Next', sans-serif;
+  color: #1e2b22;
+  background: #f2f5f1;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+
+  --canvas: #f2f5f1;
+  --sidebar: #f8faf7;
+  --surface: #fff;
+  --surface-hover: #eef2ed;
+  --line: #e4e9e2;
+  --line-strong: #d9e0d7;
+  --ink: #1e2b22;
+  --ink-soft: #4f5d51;
+  --ink-muted: #657365;
+  --forest: #294b39;
+  --moss: #506b42;
+  --green: #4e9866;
+  --mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  height: 100%;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  height: 100%;
+  min-height: 100svh;
+  margin: 0;
+}
+
+#root {
+  height: 100%;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #72985a;
+  outline-offset: 3px;
+}
+
+::selection {
+  background: #d9e8cd;
+  color: #1e2b22;
+}
