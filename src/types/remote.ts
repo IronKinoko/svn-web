@@ -9,6 +9,11 @@ export type RemoteLocation = {
   updatedAt?: string
 }
 
+export type NewRemoteLocation = Pick<
+  RemoteLocation,
+  'name' | 'url' | 'username' | 'password'
+>
+
 export type FavoriteFolder = {
   path: string
   name: string

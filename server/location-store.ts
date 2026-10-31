@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { isValidLocationId } from './tree-cache.js'
+import { generateLocationId, isValidLocationId } from './location-id.js'
 
 export type StoredLocation = {
   id: string
@@ -86,7 +86,7 @@ async function readDatabase(): Promise<LocationDatabase> {
 
 async function writeDatabase(database: LocationDatabase) {
   await mkdir(dirname(locationFile), { recursive: true, mode: 0o700 })
-  const temporaryFile = `${locationFile}.${randomUUID()}.tmp`
+  const temporaryFile = `${locationFile}.${randomBytes(16).toString('hex')}.tmp`
   await writeFile(temporaryFile, JSON.stringify(database), {
     encoding: 'utf8',
     mode: 0o600,
@@ -100,6 +100,34 @@ function mutateDatabase<T>(mutate: (database: LocationDatabase) => T) {
     const result = mutate(database)
     await writeDatabase(database)
     return result
+  })
+  mutationQueue = operation.then(() => undefined, () => undefined)
+  return operation
+}
+
+export function migrateLocationIds() {
+  const operation = mutationQueue.then(async () => {
+    const database = await readDatabase()
+    const usedIds = new Set<string>()
+
+    for (const location of database.locations) {
+      if (!isValidLocationId(location.id)) continue
+      if (usedIds.has(location.id)) {
+        throw new Error(`重复的远程地址标识: ${location.id}`)
+      }
+      usedIds.add(location.id)
+    }
+
+    let migratedCount = 0
+    for (const location of database.locations) {
+      if (isValidLocationId(location.id)) continue
+      location.id = generateLocationId(usedIds)
+      usedIds.add(location.id)
+      migratedCount += 1
+    }
+
+    if (migratedCount > 0) await writeDatabase(database)
+    return migratedCount
   })
   mutationQueue = operation.then(() => undefined, () => undefined)
   return operation
@@ -141,19 +169,12 @@ export function upsertLocation(
 }
 
 export function createLocation(
-  input: Omit<StoredLocation, 'id' | 'updatedAt' | 'favorites'> & { id?: string },
+  input: Omit<StoredLocation, 'id' | 'updatedAt' | 'favorites'>,
 ) {
   return mutateDatabase((database) => {
-    let id = input.id
-    if (id && database.locations.some((location) => location.id === id)) {
-      throw new Error('地址标识已存在')
-    }
-    if (!id) {
-      do {
-        id = randomUUID()
-      } while (database.locations.some((location) => location.id === id))
-    }
-    if (!isValidLocationId(id)) throw new Error('地址标识无效')
+    const id = generateLocationId(
+      new Set(database.locations.map((location) => location.id)),
+    )
 
     const location: StoredLocation = {
       id,

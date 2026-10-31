@@ -2,11 +2,21 @@ import {
   ChevronDown,
   ChevronRight,
   FileCode2,
-  History,
+  Folder,
+  FolderOpen,
+  List,
+  ListTree,
   LoaderCircle,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { requestFileComparison, requestFileHistory } from '../api/remote'
 import { fileIconUrl } from '../fileIcons'
 import { formatModifiedAt } from '../lib/format'
@@ -47,8 +57,81 @@ const actionLabels: Record<RevisionFileChange['action'], string> = {
   R: '替换',
 }
 
+type FileListView = 'tree' | 'list'
+
+type ChangedFileTreeNode = {
+  name: string
+  path: string
+  kind: 'directory' | 'file'
+  file?: RevisionFileChange
+  children: ChangedFileTreeNode[]
+}
+
+const FILE_LIST_VIEW_STORAGE_KEY = 'history-file-view'
+
 function fileName(path: string) {
   return path.split('/').pop() || path
+}
+
+function readStoredFileListView(): FileListView {
+  try {
+    const storedView = window.localStorage.getItem(FILE_LIST_VIEW_STORAGE_KEY)
+    return storedView === 'list' ? 'list' : 'tree'
+  } catch {
+    return 'tree'
+  }
+}
+
+function buildChangedFileTree(
+  files: RevisionFileChange[],
+  baseUrl: string,
+): ChangedFileTreeNode[] {
+  const roots: ChangedFileTreeNode[] = []
+
+  for (const file of files) {
+    const segments = (
+      formatRevisionPath(file.path, baseUrl) || fileName(file.path)
+    )
+      .split('/')
+      .filter(Boolean)
+    if (!segments.length) continue
+
+    let siblings = roots
+    let parentPath = ''
+
+    segments.forEach((name, index) => {
+      parentPath = parentPath ? `${parentPath}/${name}` : name
+      const kind = index === segments.length - 1 ? 'file' : 'directory'
+      let node = siblings.find(
+        (candidate) => candidate.name === name && candidate.kind === kind,
+      )
+
+      if (!node) {
+        node = { name, path: parentPath, kind, children: [] }
+        siblings.push(node)
+      }
+
+      if (kind === 'directory') {
+        siblings = node.children
+      } else {
+        node.file = file
+      }
+    })
+  }
+
+  const sortNodes = (nodes: ChangedFileTreeNode[]) => {
+    nodes.sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === 'directory' ? -1 : 1
+      return left.name.localeCompare(right.name, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    })
+    nodes.forEach((node) => sortNodes(node.children))
+  }
+  sortNodes(roots)
+
+  return roots
 }
 
 function chooseRevisionFile(
@@ -89,9 +172,12 @@ export function FileHistory({
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
   const [historyRequestVersion, setHistoryRequestVersion] = useState(0)
-  const [expandedRevisions, setExpandedRevisions] = useState<Set<number>>(
-    new Set(),
-  )
+  const [expandedRevision, setExpandedRevision] = useState<number | null>(null)
+  const [fileListView, setFileListView] =
+    useState<FileListView>(readStoredFileListView)
+  const [collapsedFileDirectories, setCollapsedFileDirectories] = useState<
+    Set<string>
+  >(new Set())
   const [comparisonState, setComparisonState] = useState<{
     key: string
     comparison?: FileComparison
@@ -128,9 +214,7 @@ export function FileHistory({
             )) ||
           result.entries[0]
         if (selectedRevision) {
-          setExpandedRevisions((current) =>
-            new Set(current).add(selectedRevision.revision),
-          )
+          setExpandedRevision(selectedRevision.revision)
         }
       })
       .catch((caught: unknown) => {
@@ -238,12 +322,7 @@ export function FileHistory({
   }
 
   const toggleRevision = (revision: number) => {
-    setExpandedRevisions((current) => {
-      const next = new Set(current)
-      if (next.has(revision)) next.delete(revision)
-      else next.add(revision)
-      return next
-    })
+    setExpandedRevision((current) => (current === revision ? null : revision))
   }
 
   const selectRevision = (revisionEntry: FileHistoryData['entries'][number]) => {
@@ -252,9 +331,7 @@ export function FileHistory({
       return
     }
 
-    setExpandedRevisions((current) =>
-      new Set(current).add(revisionEntry.revision),
-    )
+    setExpandedRevision(revisionEntry.revision)
     const file = chooseRevisionFile(
       revisionEntry,
       entry.path,
@@ -269,12 +346,123 @@ export function FileHistory({
 
   const openFile = (file: RevisionFileChange, revision: number) => {
     if (file.action === 'D') return
-    setExpandedRevisions((current) => new Set(current).add(revision))
+    setExpandedRevision(revision)
     onSelectFile(
       revision,
       repositoryRelativePath(file.path, location.url),
     )
   }
+
+  const chooseFileListView = (nextView: FileListView) => {
+    setFileListView(nextView)
+    try {
+      window.localStorage.setItem(FILE_LIST_VIEW_STORAGE_KEY, nextView)
+    } catch {
+      // The selected view still applies when local storage is unavailable.
+    }
+  }
+
+  const toggleFileDirectory = (revision: number, path: string) => {
+    const key = `${revision}:${path}`
+    setCollapsedFileDirectories((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const renderFileButton = (
+    file: RevisionFileChange,
+    revision: number,
+    displayName: string,
+    treeDepth?: number,
+  ) => {
+    const isSelected =
+      selectedFile?.file.path === file.path &&
+      selectedFile.revision === revision
+    const isDeleted = file.action === 'D'
+    const iconUrl = fileIconUrl(fileName(file.path))
+    const repositoryPath = repositoryRelativePath(file.path, location.url)
+
+    return (
+      <button
+        key={file.path}
+        className={`history-file${treeDepth !== undefined ? ' history-tree-file' : ''}${isSelected ? ' is-selected' : ''}`}
+        type="button"
+        onClick={() => openFile(file, revision)}
+        disabled={isDeleted}
+        title={
+          isDeleted
+            ? `${repositoryPath} 在此版本中已删除`
+            : repositoryPath
+        }
+        aria-current={isSelected ? 'true' : undefined}
+        style={
+          treeDepth === undefined
+            ? undefined
+            : { paddingInlineStart: `${8 + treeDepth * 14}px` }
+        }
+      >
+        {iconUrl ? (
+          <img src={iconUrl} alt="" aria-hidden="true" />
+        ) : (
+          <FileCode2 size={14} aria-hidden="true" />
+        )}
+        <span className="history-file-name">{displayName}</span>
+        <span className={`history-action history-action-${file.action}`}>
+          {actionLabels[file.action]}
+        </span>
+      </button>
+    )
+  }
+
+  const renderFileTree = (
+    nodes: ChangedFileTreeNode[],
+    revision: number,
+    depth = 0,
+  ): ReactNode => (
+    <ul className="history-file-tree">
+      {nodes.map((node) => {
+        if (node.kind === 'directory') {
+          const directoryKey = `${revision}:${node.path}`
+          const isExpanded = !collapsedFileDirectories.has(directoryKey)
+
+          return (
+            <li className="history-file-tree-directory" key={node.path}>
+              <button
+                className="history-file-tree-directory-button"
+                type="button"
+                onClick={() => toggleFileDirectory(revision, node.path)}
+                aria-expanded={isExpanded}
+                style={{ paddingInlineStart: `${8 + depth * 14}px` }}
+              >
+                {isExpanded ? (
+                  <ChevronDown size={13} aria-hidden="true" />
+                ) : (
+                  <ChevronRight size={13} aria-hidden="true" />
+                )}
+                {isExpanded ? (
+                  <FolderOpen size={14} aria-hidden="true" />
+                ) : (
+                  <Folder size={14} aria-hidden="true" />
+                )}
+                <span>{node.name}</span>
+              </button>
+              {isExpanded && renderFileTree(node.children, revision, depth + 1)}
+            </li>
+          )
+        }
+
+        return (
+          <li className="history-file-tree-entry" key={node.path}>
+            {node.file &&
+              renderFileButton(node.file, revision, node.name, depth)}
+          </li>
+        )
+      })}
+    </ul>
+  )
 
   const retryFile = () => {
     setFileRequestVersion((value) => value + 1)
@@ -303,7 +491,7 @@ export function FileHistory({
         }
       })
       if (revision && next.entries.some((item) => item.revision === revision)) {
-        setExpandedRevisions((current) => new Set(current).add(revision))
+        setExpandedRevision(revision)
       }
       setLoadMoreError(null)
     } catch (caught) {
@@ -379,37 +567,8 @@ export function FileHistory({
       className="history-page"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="history-title"
+      aria-label={`文件历史：${entry.name}`}
     >
-      <header className="history-page-header">
-        <div className="history-title">
-          <span className="history-title-icon">
-            <History size={18} />
-          </span>
-          <div>
-            <p className="eyebrow">FILE HISTORY</p>
-            <h2 id="history-title" title={entry.path}>
-              {entry.name}
-            </h2>
-          </div>
-          <span
-            className="history-path"
-            title={repositoryRelativePath(entry.path, location.url)}
-          >
-            {entryDisplayPath}
-          </span>
-        </div>
-        <button
-          className="comparison-close"
-          type="button"
-          onClick={onClose}
-          aria-label="关闭文件历史"
-          title="关闭"
-        >
-          <X size={19} />
-        </button>
-      </header>
-
       <div className="history-layout">
         <aside className="history-panel" aria-label="文件改动历史">
           <div className="history-panel-head">
@@ -419,7 +578,32 @@ export function FileHistory({
                 {history ? `${history.entries.length} 个修订版本` : '读取中'}
               </span>
             </div>
-            <span className="history-panel-source">{location.name}</span>
+            <div
+              className="history-file-view-selector"
+              role="group"
+              aria-label="变更文件展示方式"
+            >
+              <button
+                className={`history-file-view-choice${fileListView === 'tree' ? ' is-selected' : ''}`}
+                type="button"
+                onClick={() => chooseFileListView('tree')}
+                aria-label="树形展示"
+                aria-pressed={fileListView === 'tree'}
+                title="树形展示"
+              >
+                <ListTree size={15} aria-hidden="true" />
+              </button>
+              <button
+                className={`history-file-view-choice${fileListView === 'list' ? ' is-selected' : ''}`}
+                type="button"
+                onClick={() => chooseFileListView('list')}
+                aria-label="列表展示"
+                aria-pressed={fileListView === 'list'}
+                title="列表展示"
+              >
+                <List size={15} aria-hidden="true" />
+              </button>
+            </div>
           </div>
 
           {isHistoryLoading ? (
@@ -440,7 +624,7 @@ export function FileHistory({
                 const changedFiles = revision.files.filter(
                   (file) => file.kind === 'file',
                 )
-                const isExpanded = expandedRevisions.has(revision.revision)
+                const isExpanded = expandedRevision === revision.revision
 
                 return (
                   <div
@@ -479,52 +663,18 @@ export function FileHistory({
 
                     {isExpanded && (
                       <div className="history-changed-files">
-                        {changedFiles.map((file) => {
-                          const isSelected =
-                            selectedFile?.file.path === file.path &&
-                            selectedFile.revision === revision.revision
-                          const isDeleted = file.action === 'D'
-                          const iconUrl = fileIconUrl(fileName(file.path))
-                          const displayPath = formatRevisionPath(
-                            file.path,
-                            location.url,
-                          )
-                          const repositoryPath = repositoryRelativePath(
-                            file.path,
-                            location.url,
-                          )
-
-                          return (
-                            <button
-                              key={file.path}
-                              className={`history-file ${isSelected ? 'is-selected' : ''}`}
-                              type="button"
-                              onClick={() => openFile(file, revision.revision)}
-                              disabled={isDeleted}
-                              title={
-                                isDeleted
-                                  ? `${repositoryPath} 在此版本中已删除`
-                                  : repositoryPath
-                              }
-                            >
-                              {iconUrl && (
-                                <img
-                                  src={iconUrl}
-                                  alt=""
-                                  aria-hidden="true"
-                                />
-                              )}
-                              <span className="history-file-name">
-                                {displayPath}
-                              </span>
-                              <span
-                                className={`history-action history-action-${file.action}`}
-                              >
-                                {actionLabels[file.action]}
-                              </span>
-                            </button>
-                          )
-                        })}
+                        {fileListView === 'tree'
+                          ? renderFileTree(
+                              buildChangedFileTree(changedFiles, location.url),
+                              revision.revision,
+                            )
+                          : changedFiles.map((file) =>
+                              renderFileButton(
+                                file,
+                                revision.revision,
+                                formatRevisionPath(file.path, location.url),
+                              ),
+                            )}
                       </div>
                     )}
                   </div>
@@ -555,9 +705,9 @@ export function FileHistory({
         </aside>
 
         <section className="history-code-panel" aria-label="文件代码">
-          {selectedFile ? (
-            <>
-              <div className="history-code-head">
+          <div className="history-code-head">
+            {selectedFile ? (
+              <>
                 <span className="history-code-icon">
                   <FileCode2 size={15} />
                 </span>
@@ -572,43 +722,65 @@ export function FileHistory({
                     {formatRevisionPath(selectedFile.file.path, location.url)}
                   </span>
                 </div>
-                <code>r{selectedFile.revision}</code>
+              </>
+            ) : (
+              <>
+                <span className="history-code-icon">
+                  <FileCode2 size={15} />
+                </span>
+                <div>
+                  <strong>文件代码</strong>
+                  <span>{entryDisplayPath}</span>
+                </div>
+              </>
+            )}
+            <button
+              className="comparison-close"
+              type="button"
+              onClick={onClose}
+              aria-label="关闭文件历史"
+              title="关闭"
+            >
+              <X size={19} />
+            </button>
+          </div>
+          <div className="history-code-body">
+            {selectedFile ? (
+              isFileLoading ? (
+                <div className="history-code-state">
+                  <LoaderCircle size={18} className="spin" />
+                  正在读取 r{selectedFile.revision} 与上一版本的差异…
+                </div>
+              ) : fileError ? (
+                <div className="history-code-state history-panel-error">
+                  <span>{fileError}</span>
+                  <button type="button" onClick={retryFile}>
+                    重新加载
+                  </button>
+                </div>
+              ) : comparison ? (
+                <RevisionDiff
+                  comparison={comparison}
+                  path={selectedFile.file.path}
+                />
+              ) : null
+            ) : isLocatingRevision ? (
+              <div className="history-code-state">
+                <LoaderCircle size={18} className="spin" />
+                正在加载 r{revision} 的历史记录…
               </div>
-              <div className="history-code-body">
-                {isFileLoading ? (
-                  <div className="history-code-state">
-                    <LoaderCircle size={18} className="spin" />
-                    正在读取 r{selectedFile.revision} 与上一版本的差异…
-                  </div>
-                ) : fileError ? (
-                  <div className="history-code-state history-panel-error">
-                    <span>{fileError}</span>
-                    <button type="button" onClick={retryFile}>
-                      重新加载
-                    </button>
-                  </div>
-                ) : comparison ? (
-                  <RevisionDiff
-                    comparison={comparison}
-                    path={selectedFile.file.path}
-                  />
-                ) : null}
+            ) : (
+              <div className="history-empty-code">
+                <span className="history-empty-code-icon">
+                  <FileCode2 size={23} />
+                </span>
+                <strong>选择左侧的变更文件</strong>
+                <p>
+                  展开任意修订版本，然后点击文件查看该版本与上一版本的差异。
+                </p>
               </div>
-            </>
-          ) : isLocatingRevision ? (
-            <div className="history-code-state">
-              <LoaderCircle size={18} className="spin" />
-              正在加载 r{revision} 的历史记录…
-            </div>
-          ) : (
-            <div className="history-empty-code">
-              <span className="history-empty-code-icon">
-                <FileCode2 size={23} />
-              </span>
-              <strong>选择左侧的变更文件</strong>
-              <p>展开任意修订版本，然后点击文件查看该版本与上一版本的差异。</p>
-            </div>
-          )}
+            )}
+          </div>
         </section>
       </div>
     </section>

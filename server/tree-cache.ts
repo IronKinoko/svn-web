@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
@@ -29,10 +29,6 @@ const cacheFile = resolve(
 )
 
 let mutationQueue: Promise<void> = Promise.resolve()
-
-export function isValidLocationId(value: string) {
-  return /^[a-zA-Z0-9_-]{1,128}$/.test(value)
-}
 
 export function isValidCachePath(path: string, allowRoot = false) {
   if (path === '') return allowRoot
@@ -69,7 +65,7 @@ async function readDatabase(): Promise<CacheDatabase> {
 
 async function writeDatabase(database: CacheDatabase) {
   await mkdir(dirname(cacheFile), { recursive: true, mode: 0o700 })
-  const temporaryFile = `${cacheFile}.${randomUUID()}.tmp`
+  const temporaryFile = `${cacheFile}.${randomBytes(16).toString('hex')}.tmp`
   await writeFile(temporaryFile, JSON.stringify(database), {
     encoding: 'utf8',
     mode: 0o600,
@@ -151,6 +147,22 @@ export function clearTreeCache(locationId: string) {
   return mutateDatabase((database) => {
     delete database.locations[locationId]
   })
+}
+
+export function pruneTreeCache(locationIds: ReadonlySet<string>) {
+  const operation = mutationQueue.then(async () => {
+    const database = await readDatabase()
+    let removedCount = 0
+    for (const locationId of Object.keys(database.locations)) {
+      if (locationIds.has(locationId)) continue
+      delete database.locations[locationId]
+      removedCount += 1
+    }
+    if (removedCount > 0) await writeDatabase(database)
+    return removedCount
+  })
+  mutationQueue = operation.then(() => undefined, () => undefined)
+  return operation
 }
 
 export function invalidateTreeCacheSubtree(

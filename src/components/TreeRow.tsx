@@ -259,14 +259,6 @@ export function TreeRow({
                 aria-hidden="true"
               />
             )}
-            {isFavorite && (
-              <Star
-                className="tree-favorite-mark"
-                size={11}
-                fill="currentColor"
-                aria-label="已收藏"
-              />
-            )}
             <span>{entry.name}</span>
           </span>
         ) : (

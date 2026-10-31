@@ -10,7 +10,11 @@ import {
   clearLegacyLocationStorage,
   readLegacyLocations,
 } from '../lib/legacyLocations'
-import type { FavoriteFolder, RemoteLocation } from '../types/remote'
+import type {
+  FavoriteFolder,
+  NewRemoteLocation,
+  RemoteLocation,
+} from '../types/remote'
 
 export function useRemoteLocations() {
   const [locations, setLocations] = useState<RemoteLocation[]>([])
@@ -87,7 +91,7 @@ export function useRemoteLocations() {
     }
   }, [])
 
-  const createLocation = async (location: RemoteLocation) => {
+  const createLocation = async (location: NewRemoteLocation) => {
     const created = await createStoredLocation(location)
     setLocations((current) => [...current, created])
     setActiveLocationId(created.id)

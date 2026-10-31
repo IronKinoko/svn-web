@@ -10,6 +10,7 @@
     "dev:web": "vite",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "start": "node server-dist/index.js",
+    "test": "tsx --test tests/*.test.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },

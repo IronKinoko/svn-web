@@ -18,11 +18,7 @@ export type AppRoute = RemoteAppRoute | HistoryAppRoute
 
 function normalizeLocationId(value?: string) {
   const locationId = value?.trim()
-  const hasControlCharacter = Array.from(locationId ?? '').some((character) => {
-    const codePoint = character.codePointAt(0) ?? 0
-    return codePoint < 32 || codePoint === 127
-  })
-  if (!locationId || locationId.length > 128 || hasControlCharacter) {
+  if (!locationId || !/^[A-Za-z0-9]{6}$/.test(locationId)) {
     return undefined
   }
   return locationId

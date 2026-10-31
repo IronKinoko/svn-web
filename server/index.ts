@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import {
   createLocation,
   deleteLocation,
+  migrateLocationIds,
   readLocation,
   readLocations,
   updateLocation,
@@ -18,10 +19,11 @@ import {
   clearTreeCache,
   invalidateTreeCacheSubtree,
   isValidCachePath,
-  isValidLocationId,
+  pruneTreeCache,
   readTreeCache,
   type TreeEntry,
 } from './tree-cache.js'
+import { isValidLocationId } from './location-id.js'
 
 const app = Fastify({ logger: true })
 const clientDirectory = resolve(process.cwd(), 'dist/client')
@@ -1018,6 +1020,23 @@ app.setNotFoundHandler((request, reply) => {
 })
 
 try {
+  const migratedLocationCount = await migrateLocationIds()
+  const locations = await readLocations()
+  let removedCacheCount = 0
+  try {
+    removedCacheCount = await pruneTreeCache(
+      new Set(locations.map((location) => location.id)),
+    )
+  } catch (error) {
+    app.log.warn({ err: error }, 'Unable to prune obsolete tree caches')
+  }
+  if (migratedLocationCount || removedCacheCount) {
+    app.log.info(
+      { migratedLocationCount, removedCacheCount },
+      'Migrated remote location IDs to six-character IDs',
+    )
+  }
+
   await app.listen({
     host:
       process.env.HOST ??

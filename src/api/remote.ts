@@ -2,6 +2,7 @@ import type {
   FavoriteFolder,
   FileComparison,
   FileHistory,
+  NewRemoteLocation,
   PersistentTreeCache,
   RemoteLocation,
   TreeEntry,
@@ -30,11 +31,18 @@ export async function requestStoredLocations(): Promise<RemoteLocation[]> {
   return result.locations ?? []
 }
 
-export async function createStoredLocation(location: RemoteLocation) {
+export async function createStoredLocation(location: NewRemoteLocation) {
   const response = await fetch('/api/remote/locations', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(location),
+    body: JSON.stringify({
+      name: location.name,
+      url: location.url,
+      username: location.username,
+      ...(location.password !== undefined
+        ? { password: location.password }
+        : {}),
+    }),
   })
   const result = await readJson<{ location?: RemoteLocation; error?: string }>(
     response,

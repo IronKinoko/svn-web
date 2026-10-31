@@ -3,12 +3,15 @@ import {
   clearPersistentTreeCache,
 } from '../api/remote'
 import { inferLocationName, isSupportedRemoteUrl, normalizeRemoteUrl } from '../lib/url'
-import { createId } from '../lib/uuid'
-import type { LocationDraft, RemoteLocation } from '../types/remote'
+import type {
+  LocationDraft,
+  NewRemoteLocation,
+  RemoteLocation,
+} from '../types/remote'
 
 type LocationFormInput = {
   locations: RemoteLocation[]
-  createLocation: (location: RemoteLocation) => Promise<RemoteLocation>
+  createLocation: (location: NewRemoteLocation) => Promise<RemoteLocation>
   saveLocation: (location: RemoteLocation) => Promise<RemoteLocation>
   clearLocationCache: (locationId: string) => void
   prepareLocation: (location: RemoteLocation) => void
@@ -73,8 +76,7 @@ export function useLocationForm({
     }
 
     const normalizedUrl = normalizeRemoteUrl(draft.url)
-    const locationInput: RemoteLocation = {
-      id: editingLocationId ?? createId(),
+    const locationInput: NewRemoteLocation = {
       name: draft.name.trim() || inferLocationName(normalizedUrl),
       url: normalizedUrl,
       username: draft.username.trim(),
@@ -92,7 +94,10 @@ export function useLocationForm({
 
       let savedLocation: RemoteLocation
       try {
-        savedLocation = await saveLocation(locationInput)
+        savedLocation = await saveLocation({
+          id: editingLocationId,
+          ...locationInput,
+        })
       } catch (caught) {
         reportError(caught instanceof Error ? caught.message : '无法更新后端地址记录')
         return

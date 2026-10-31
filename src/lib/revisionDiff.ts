@@ -50,6 +50,10 @@ type AlignedLine = {
 const MIN_PAIR_SIMILARITY = 0.5
 const MAX_ALIGNMENT_CELLS = 250_000
 
+function normalizeLineEndings(content: string) {
+  return content.replace(/\r\n?/g, '\n')
+}
+
 function splitDiffLines(value: string) {
   if (!value) return []
 
@@ -353,11 +357,13 @@ export function buildRevisionMergeChanges(
   previousContent: string,
   currentContent: string,
 ): RevisionMergeLayout {
+  const previous = normalizeLineEndings(previousContent)
+  const current = normalizeLineEndings(currentContent)
   const changes: Change[] = []
-  const previousSourceLines = splitDiffLines(previousContent)
-  const currentSourceLines = splitDiffLines(currentContent)
-  const previousOffsetLines = buildOffsetLines(previousContent)
-  const currentOffsetLines = buildOffsetLines(currentContent)
+  const previousSourceLines = splitDiffLines(previous)
+  const currentSourceLines = splitDiffLines(current)
+  const previousOffsetLines = buildOffsetLines(previous)
+  const currentOffsetLines = buildOffsetLines(current)
   let previousIndex = 0
   let currentIndex = 0
   let pendingPrevious: OffsetLine[] = []
@@ -428,12 +434,12 @@ export function buildRevisionMergeChanges(
         blockPreviousStart = offsetAt(
           previousOffsetLines,
           previousIndex,
-          previousContent.length,
+          previous.length,
         )
         blockCurrentStart = offsetAt(
           currentOffsetLines,
           currentIndex,
-          currentContent.length,
+          current.length,
         )
       }
       pendingPrevious.push(
@@ -451,12 +457,12 @@ export function buildRevisionMergeChanges(
         blockPreviousStart = offsetAt(
           previousOffsetLines,
           previousIndex,
-          previousContent.length,
+          previous.length,
         )
         blockCurrentStart = offsetAt(
           currentOffsetLines,
           currentIndex,
-          currentContent.length,
+          current.length,
         )
       }
       pendingCurrent.push(
@@ -577,6 +583,8 @@ export function buildRevisionDiff(
   previousContent: string,
   currentContent: string,
 ): RevisionDiffModel {
+  const previous = normalizeLineEndings(previousContent)
+  const current = normalizeLineEndings(currentContent)
   const previousLines: DiffLine[] = []
   const currentLines: DiffLine[] = []
   const rows: DiffRow[] = []
@@ -668,8 +676,8 @@ export function buildRevisionDiff(
     pendingCurrent = []
   }
 
-  const previousSourceLines = splitDocumentLines(previousContent)
-  const currentSourceLines = splitDocumentLines(currentContent)
+  const previousSourceLines = splitDocumentLines(previous)
+  const currentSourceLines = splitDocumentLines(current)
 
   for (const change of diffArrays(
     previousSourceLines,

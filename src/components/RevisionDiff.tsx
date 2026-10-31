@@ -29,6 +29,7 @@ import {
 import {
   Columns2,
   Minus,
+  MonitorSmartphone,
   Plus,
   Rows3,
 } from 'lucide-react'
@@ -53,8 +54,10 @@ type DiffStats = {
 }
 
 type DiffLayout = 'split' | 'unified'
+type DiffLayoutMode = DiffLayout | 'auto'
 
 const DIFF_LAYOUT_STORAGE_KEY = 'diff-view'
+const AUTO_SPLIT_QUERY = '(min-width: 1200px)'
 const unchangedCollapseConfig = { margin: 5, minSize: 5 }
 
 class DiffLineNumberMarker extends GutterMarker {
@@ -98,13 +101,47 @@ const deletedLineNumberWidgetMarker = lineNumberWidgetMarker.of(
   },
 )
 
-function readStoredDiffLayout(): DiffLayout {
+function readStoredDiffLayout(): DiffLayoutMode {
   try {
-    return window.localStorage.getItem(DIFF_LAYOUT_STORAGE_KEY) === 'unified'
-      ? 'unified'
-      : 'split'
+    const storedLayout = window.localStorage.getItem(DIFF_LAYOUT_STORAGE_KEY)
+    if (
+      storedLayout === 'split' ||
+      storedLayout === 'unified' ||
+      storedLayout === 'auto'
+    ) {
+      return storedLayout
+    }
+    return 'auto'
   } catch {
-    return 'split'
+    return 'auto'
+  }
+}
+
+function synchronizeHorizontalScroll(mergeView: MergeView) {
+  const leftScroller = mergeView.a.scrollDOM
+  const rightScroller = mergeView.b.scrollDOM
+  const expectedScrollPositions = new WeakMap<HTMLElement, number>()
+
+  const syncScroll = (source: HTMLElement, target: HTMLElement) => {
+    const expectedScrollLeft = expectedScrollPositions.get(source)
+    if (expectedScrollLeft !== undefined) {
+      expectedScrollPositions.delete(source)
+      if (Math.abs(source.scrollLeft - expectedScrollLeft) < 1) return
+    }
+
+    if (target.scrollLeft === source.scrollLeft) return
+    target.scrollLeft = source.scrollLeft
+    expectedScrollPositions.set(target, target.scrollLeft)
+  }
+  const syncLeftToRight = () => syncScroll(leftScroller, rightScroller)
+  const syncRightToLeft = () => syncScroll(rightScroller, leftScroller)
+
+  leftScroller.addEventListener('scroll', syncLeftToRight, { passive: true })
+  rightScroller.addEventListener('scroll', syncRightToLeft, { passive: true })
+
+  return () => {
+    leftScroller.removeEventListener('scroll', syncLeftToRight)
+    rightScroller.removeEventListener('scroll', syncRightToLeft)
   }
 }
 
@@ -271,7 +308,29 @@ function RevisionLabel({
 export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
   const host = useRef<HTMLDivElement>(null)
   const [stats, setStats] = useState<DiffStats>({ added: 0, removed: 0 })
-  const [layout, setLayout] = useState<DiffLayout>(readStoredDiffLayout)
+  const [layoutMode, setLayoutMode] =
+    useState<DiffLayoutMode>(readStoredDiffLayout)
+  const [isWideViewport, setIsWideViewport] = useState(() =>
+    typeof window !== 'undefined' &&
+    window.matchMedia(AUTO_SPLIT_QUERY).matches,
+  )
+  const layout: DiffLayout =
+    layoutMode === 'auto'
+      ? isWideViewport
+        ? 'split'
+        : 'unified'
+      : layoutMode
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(AUTO_SPLIT_QUERY)
+    const handleViewportChange = (event: MediaQueryListEvent) => {
+      setIsWideViewport(event.matches)
+    }
+
+    mediaQuery.addEventListener('change', handleViewportChange)
+    return () =>
+      mediaQuery.removeEventListener('change', handleViewportChange)
+  }, [])
 
   useEffect(() => {
     const element = host.current
@@ -280,6 +339,7 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
     let cancelled = false
     let mergeView: MergeView | null = null
     let editorView: EditorView | null = null
+    let removeHorizontalScrollSync: (() => void) | null = null
 
     const mountEditor = async () => {
       const description = LanguageDescription.matchFilename(
@@ -429,28 +489,27 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
         collapseUnchanged: unchangedCollapseConfig,
         diffConfig: alignedDiffConfig,
       })
+      removeHorizontalScrollSync = synchronizeHorizontalScroll(mergeView)
     }
 
     void mountEditor()
 
     return () => {
       cancelled = true
+      removeHorizontalScrollSync?.()
       mergeView?.destroy()
       editorView?.destroy()
       element.replaceChildren()
     }
   }, [comparison, layout, path])
 
-  const switchLayout = () => {
-    setLayout((current) => {
-      const next = current === 'split' ? 'unified' : 'split'
-      try {
-        window.localStorage.setItem(DIFF_LAYOUT_STORAGE_KEY, next)
-      } catch {
-        // The layout still switches when local storage is unavailable.
-      }
-      return next
-    })
+  const chooseLayout = (nextLayout: DiffLayoutMode) => {
+    setLayoutMode(nextLayout)
+    try {
+      window.localStorage.setItem(DIFF_LAYOUT_STORAGE_KEY, nextLayout)
+    } catch {
+      // The selected layout still applies when local storage is unavailable.
+    }
   }
 
   return (
@@ -467,17 +526,42 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
         <span className="history-diff-description">
           {layout === 'split' ? '左右分栏' : '单窗口'}逐行对比 · 完整文件内容
         </span>
-        <button
-          className="history-diff-layout-toggle"
-          type="button"
-          aria-pressed={layout === 'unified'}
-          aria-label={`切换为${layout === 'split' ? '单窗口' : '左右分栏'}对比`}
-          title={`切换为${layout === 'split' ? '单窗口' : '左右分栏'}对比`}
-          onClick={switchLayout}
+        <div
+          className="history-diff-layout-selector"
+          role="group"
+          aria-label="对比布局"
         >
-          {layout === 'split' ? <Rows3 size={13} /> : <Columns2 size={13} />}
-          <span>{layout === 'split' ? '单窗口' : '左右对比'}</span>
-        </button>
+          <button
+            className={`history-diff-layout-choice${layoutMode === 'split' ? ' is-selected' : ''}`}
+            type="button"
+            aria-pressed={layoutMode === 'split'}
+            aria-label="左右对比"
+            title="固定使用左右对比"
+            onClick={() => chooseLayout('split')}
+          >
+            <Columns2 size={15} aria-hidden="true" />
+          </button>
+          <button
+            className={`history-diff-layout-choice${layoutMode === 'unified' ? ' is-selected' : ''}`}
+            type="button"
+            aria-pressed={layoutMode === 'unified'}
+            aria-label="单窗口"
+            title="固定使用单窗口对比"
+            onClick={() => chooseLayout('unified')}
+          >
+            <Rows3 size={15} aria-hidden="true" />
+          </button>
+          <button
+            className={`history-diff-layout-choice${layoutMode === 'auto' ? ' is-selected' : ''}`}
+            type="button"
+            aria-pressed={layoutMode === 'auto'}
+            aria-label="自动布局"
+            title="自动：窗口较宽时左右对比，较窄时单窗口"
+            onClick={() => chooseLayout('auto')}
+          >
+            <MonitorSmartphone size={15} aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <div
         className={`history-diff-column-heads${layout === 'unified' ? ' is-unified' : ''}`}
