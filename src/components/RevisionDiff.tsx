@@ -39,6 +39,9 @@ import {
   buildAlignedMergeChanges,
   buildRevisionDiff,
   buildRevisionMergeChanges,
+  resolveRevisionDiffLayout,
+  type DiffLayout,
+  type DiffLayoutMode,
   type DiffLine,
 } from '../lib/revisionDiff'
 import type { FileComparison, FileRevision } from '../types/remote'
@@ -52,9 +55,6 @@ type DiffStats = {
   added: number
   removed: number
 }
-
-type DiffLayout = 'split' | 'unified'
-type DiffLayoutMode = DiffLayout | 'auto'
 
 const DIFF_LAYOUT_STORAGE_KEY = 'diff-view'
 const AUTO_SPLIT_QUERY = '(min-width: 1200px)'
@@ -314,12 +314,15 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
     typeof window !== 'undefined' &&
     window.matchMedia(AUTO_SPLIT_QUERY).matches,
   )
-  const layout: DiffLayout =
-    layoutMode === 'auto'
-      ? isWideViewport
-        ? 'split'
-        : 'unified'
-      : layoutMode
+  const hasPreviousVersion = comparison.previous !== null
+  const selectedLayoutMode: DiffLayoutMode = hasPreviousVersion
+    ? layoutMode
+    : 'unified'
+  const layout: DiffLayout = resolveRevisionDiffLayout(
+    layoutMode,
+    isWideViewport,
+    hasPreviousVersion,
+  )
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(AUTO_SPLIT_QUERY)
@@ -504,6 +507,7 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
   }, [comparison, layout, path])
 
   const chooseLayout = (nextLayout: DiffLayoutMode) => {
+    if (!hasPreviousVersion && nextLayout !== 'unified') return
     setLayoutMode(nextLayout)
     try {
       window.localStorage.setItem(DIFF_LAYOUT_STORAGE_KEY, nextLayout)
@@ -532,19 +536,24 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
           aria-label="对比布局"
         >
           <button
-            className={`history-diff-layout-choice${layoutMode === 'split' ? ' is-selected' : ''}`}
+            className={`history-diff-layout-choice${selectedLayoutMode === 'split' ? ' is-selected' : ''}`}
             type="button"
-            aria-pressed={layoutMode === 'split'}
+            aria-pressed={selectedLayoutMode === 'split'}
             aria-label="左右对比"
-            title="固定使用左右对比"
+            title={
+              hasPreviousVersion
+                ? '固定使用左右对比'
+                : '没有上一版本，无法左右对比'
+            }
+            disabled={!hasPreviousVersion}
             onClick={() => chooseLayout('split')}
           >
             <Columns2 size={15} aria-hidden="true" />
           </button>
           <button
-            className={`history-diff-layout-choice${layoutMode === 'unified' ? ' is-selected' : ''}`}
+            className={`history-diff-layout-choice${selectedLayoutMode === 'unified' ? ' is-selected' : ''}`}
             type="button"
-            aria-pressed={layoutMode === 'unified'}
+            aria-pressed={selectedLayoutMode === 'unified'}
             aria-label="单窗口"
             title="固定使用单窗口对比"
             onClick={() => chooseLayout('unified')}
@@ -552,11 +561,16 @@ export function RevisionDiff({ comparison, path }: RevisionDiffProps) {
             <Rows3 size={15} aria-hidden="true" />
           </button>
           <button
-            className={`history-diff-layout-choice${layoutMode === 'auto' ? ' is-selected' : ''}`}
+            className={`history-diff-layout-choice${selectedLayoutMode === 'auto' ? ' is-selected' : ''}`}
             type="button"
-            aria-pressed={layoutMode === 'auto'}
+            aria-pressed={selectedLayoutMode === 'auto'}
             aria-label="自动布局"
-            title="自动：窗口较宽时左右对比，较窄时单窗口"
+            title={
+              hasPreviousVersion
+                ? '自动：窗口较宽时左右对比，较窄时单窗口'
+                : '没有上一版本，无法自动对比'
+            }
+            disabled={!hasPreviousVersion}
             onClick={() => chooseLayout('auto')}
           >
             <MonitorSmartphone size={15} aria-hidden="true" />

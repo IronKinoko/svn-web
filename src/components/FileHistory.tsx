@@ -25,6 +25,7 @@ import {
   isSameRevisionPath,
   repositoryRelativePath,
 } from '../lib/revisionPath'
+import { prepareRevisionDiffComparison } from '../lib/revisionDiff'
 import type {
   FileComparison,
   FileHistory as FileHistoryData,
@@ -68,9 +69,15 @@ type ChangedFileTreeNode = {
 }
 
 const FILE_LIST_VIEW_STORAGE_KEY = 'history-file-view'
+// Chevron column plus gap, so same-depth file and folder icons share a column.
+const HISTORY_TREE_INDENT = 19
 
 function fileName(path: string) {
   return path.split('/').pop() || path
+}
+
+function treeIndent(depth: number) {
+  return `${8 + depth * HISTORY_TREE_INDENT}px`
 }
 
 function readStoredFileListView(): FileListView {
@@ -295,7 +302,15 @@ export function FileHistory({
       selectedFile.revision,
     )
       .then((result) => {
-        if (!cancelled) setComparisonState({ key: requestKey, comparison: result })
+        if (!cancelled) {
+          setComparisonState({
+            key: requestKey,
+            comparison: prepareRevisionDiffComparison(
+              result,
+              selectedFile.file.action,
+            ),
+          })
+        }
       })
       .catch((caught: unknown) => {
         if (!cancelled) {
@@ -401,7 +416,7 @@ export function FileHistory({
         style={
           treeDepth === undefined
             ? undefined
-            : { paddingInlineStart: `${8 + treeDepth * 14}px` }
+            : { paddingInlineStart: treeIndent(treeDepth + 1) }
         }
       >
         {iconUrl ? (
@@ -435,7 +450,7 @@ export function FileHistory({
                 type="button"
                 onClick={() => toggleFileDirectory(revision, node.path)}
                 aria-expanded={isExpanded}
-                style={{ paddingInlineStart: `${8 + depth * 14}px` }}
+                style={{ paddingInlineStart: treeIndent(depth) }}
               >
                 {isExpanded ? (
                   <ChevronDown size={13} aria-hidden="true" />

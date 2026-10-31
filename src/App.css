@@ -1302,6 +1302,7 @@
 }
 
 .history-file-tree-directory-button > svg:first-child {
+  flex: 0 0 auto;
   color: #89978b;
 }
 
@@ -1574,9 +1575,14 @@
   font: inherit;
 }
 
-.history-diff-layout-choice:hover {
+.history-diff-layout-choice:not(:disabled):hover {
   background: #eef3eb;
   color: var(--forest);
+}
+
+.history-diff-layout-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .history-diff-layout-choice.is-selected {

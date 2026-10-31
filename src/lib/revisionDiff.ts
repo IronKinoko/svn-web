@@ -1,5 +1,9 @@
 import { diffArrays, diffWordsWithSpace } from 'diff'
 import { Change } from '@codemirror/merge'
+import type {
+  FileComparison,
+  RevisionFileChange,
+} from '../types/remote'
 
 export type DiffLineKind = 'equal' | 'added' | 'removed' | 'changed'
 
@@ -33,6 +37,28 @@ export type RevisionDiffModel = {
 
 export type RevisionMergeLayout = {
   changes: Change[]
+}
+
+export type DiffLayout = 'split' | 'unified'
+export type DiffLayoutMode = DiffLayout | 'auto'
+
+export function prepareRevisionDiffComparison(
+  comparison: FileComparison,
+  action: RevisionFileChange['action'],
+): FileComparison {
+  if (action !== 'A' || comparison.previous === null) return comparison
+  // An add action starts a new path version, even if SVN returns older ancestry.
+  return { ...comparison, previous: null }
+}
+
+export function resolveRevisionDiffLayout(
+  layoutMode: DiffLayoutMode,
+  isWideViewport: boolean,
+  hasPreviousVersion: boolean,
+): DiffLayout {
+  if (!hasPreviousVersion) return 'unified'
+  if (layoutMode === 'auto') return isWideViewport ? 'split' : 'unified'
+  return layoutMode
 }
 
 type OffsetLine = {
