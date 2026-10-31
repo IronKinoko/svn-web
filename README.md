@@ -18,8 +18,8 @@
 ## 本地开发
 
 ```sh
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 API 默认运行在 `http://localhost:3000`，Vite 开发服务器代理 `/api` 请求到该端口。
