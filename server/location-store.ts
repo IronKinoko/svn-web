@@ -9,7 +9,15 @@ export type StoredLocation = {
   url: string
   username: string
   password: string
+  favorites: StoredFavoriteFolder[]
   updatedAt: string
+}
+
+export type StoredFavoriteFolder = {
+  path: string
+  name: string
+  author?: string
+  modifiedAt?: string
 }
 
 type LocationDatabase = {
@@ -48,7 +56,28 @@ async function readDatabase(): Promise<LocationDatabase> {
     ) {
       throw new Error('SVN location store has an unsupported format')
     }
-    return parsed as LocationDatabase
+    return {
+      version: 1,
+      locations: parsed.locations.map((location) => ({
+        ...location,
+        favorites: Array.isArray(location.favorites)
+          ? location.favorites.filter(
+              (favorite): favorite is StoredFavoriteFolder =>
+                Boolean(
+                  favorite &&
+                    typeof favorite.path === 'string' &&
+                    favorite.path &&
+                    typeof favorite.name === 'string' &&
+                    favorite.name &&
+                    (favorite.author === undefined ||
+                      typeof favorite.author === 'string') &&
+                    (favorite.modifiedAt === undefined ||
+                      typeof favorite.modifiedAt === 'string'),
+                ),
+            )
+          : [],
+      })),
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyDatabase()
     throw error
@@ -97,6 +126,10 @@ export function upsertLocation(
     )
     const location: StoredLocation = {
       ...input,
+      favorites:
+        existingIndex === -1
+          ? []
+          : database.locations[existingIndex].favorites,
       updatedAt: new Date().toISOString(),
     }
 
@@ -108,7 +141,7 @@ export function upsertLocation(
 }
 
 export function createLocation(
-  input: Omit<StoredLocation, 'id' | 'updatedAt'> & { id?: string },
+  input: Omit<StoredLocation, 'id' | 'updatedAt' | 'favorites'> & { id?: string },
 ) {
   return mutateDatabase((database) => {
     let id = input.id
@@ -128,6 +161,7 @@ export function createLocation(
       url: input.url,
       username: input.username,
       password: input.password,
+      favorites: [],
       updatedAt: new Date().toISOString(),
     }
     database.locations.push(location)
@@ -151,10 +185,28 @@ export function updateLocation(
       url: input.url,
       username: input.username,
       password: input.password ?? database.locations[index].password ?? '',
+      favorites: database.locations[index].favorites,
       updatedAt: new Date().toISOString(),
     }
     database.locations[index] = location
     return location
+  })
+}
+
+export function updateLocationFavorites(
+  id: string,
+  favorites: StoredFavoriteFolder[],
+) {
+  return mutateDatabase((database) => {
+    const index = database.locations.findIndex((location) => location.id === id)
+    if (index === -1) return null
+
+    database.locations[index] = {
+      ...database.locations[index],
+      favorites,
+      updatedAt: new Date().toISOString(),
+    }
+    return database.locations[index]
   })
 }
 

@@ -13,9 +13,12 @@ type TreePanelProps = {
   cacheReady: boolean
   hasError: boolean
   expanded: Set<string>
+  favoritePaths: Set<string>
   loadingKeys: Set<string>
   onCopyStatus: (message: string | null) => void
+  onHistory: (entry: TreeRow) => void
   onRefreshEntry: (entry: TreeRow) => void
+  onToggleFavorite: (entry: TreeRow) => void
   onToggle: (entry: TreeRow) => void
 }
 
@@ -28,9 +31,12 @@ export function TreePanel({
   cacheReady,
   hasError,
   expanded,
+  favoritePaths,
   loadingKeys,
   onCopyStatus,
+  onHistory,
   onRefreshEntry,
+  onToggleFavorite,
   onToggle,
 }: TreePanelProps) {
   return (
@@ -60,9 +66,12 @@ export function TreePanel({
                 entry={entry}
                 baseUrl={baseUrl}
                 isExpanded={expanded.has(entryKey)}
+                isFavorite={favoritePaths.has(entry.path)}
                 isLoading={loadingKeys.has(entryKey)}
                 onCopyStatus={onCopyStatus}
+                onHistory={onHistory}
                 onRefresh={(target) => void onRefreshEntry(target)}
+                onToggleFavorite={onToggleFavorite}
                 onToggle={onToggle}
               />
             )

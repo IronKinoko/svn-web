@@ -13,6 +13,7 @@ type LocationFormInput = {
   clearLocationCache: (locationId: string) => void
   prepareLocation: (location: RemoteLocation) => void
   reportError: (message: string | null) => void
+  onSaved: (location: RemoteLocation) => void
 }
 
 const emptyDraft: LocationDraft = {
@@ -29,6 +30,7 @@ export function useLocationForm({
   clearLocationCache,
   prepareLocation,
   reportError,
+  onSaved,
 }: LocationFormInput) {
   const [isOpen, setIsOpen] = useState(false)
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null)
@@ -106,6 +108,7 @@ export function useLocationForm({
         clearLocationCache(savedLocation.id)
       }
       prepareLocation(savedLocation)
+      onSaved(savedLocation)
     } else {
       let savedLocation: RemoteLocation
       try {
@@ -115,6 +118,7 @@ export function useLocationForm({
         return
       }
       prepareLocation(savedLocation)
+      onSaved(savedLocation)
     }
 
     close()

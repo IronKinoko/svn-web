@@ -70,6 +70,21 @@ export function removeTreeSubtreeFromSet(
   )
 }
 
+export function removeTreeEntry(
+  cache: TreeCache,
+  locationId: string,
+  path: string,
+) {
+  const parentPath = path.split('/').slice(0, -1).join('/')
+  const parentKey = treeKey(locationId, parentPath)
+  const parentEntries = cache[parentKey]
+  if (!parentEntries) return cache
+
+  const nextEntries = parentEntries.filter((entry) => entry.path !== path)
+  if (nextEntries.length === parentEntries.length) return cache
+  return { ...cache, [parentKey]: nextEntries }
+}
+
 export function toMemoryTreeCache(
   locationId: string,
   persistent: PersistentTreeCache,

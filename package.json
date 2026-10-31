@@ -2,6 +2,7 @@
   "name": "svn-web",
   "private": true,
   "version": "0.0.0",
+  "packageManager": "pnpm@12.17.0+sha512.b8d223ebec04b580a89ed206daa71d1bccb6a1ee1d52efa95cc3b0db75271561df8f0d8e2c43add39c5ec08018af7a8a95108e7090f95a29f88727b7a40fd53d",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
@@ -13,16 +14,23 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/merge": "^6.12.3",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@fastify/static": "^10.1.6",
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@mdi/js": "^7.4.47",
     "@mdi/react": "^1.6.1",
+    "diff": "^9.0.0",
     "fastify": "^5.12.7",
     "lucide-react": "^1.60.0",
     "material-icon-theme": "^5.39.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-router": "^8.5.1"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

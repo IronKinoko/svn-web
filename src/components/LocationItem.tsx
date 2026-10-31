@@ -1,10 +1,16 @@
-import { Globe2, Pencil, Trash2 } from 'lucide-react'
-import type { RemoteLocation } from '../types/remote'
+import { Globe2, Pencil, Star, Trash2 } from 'lucide-react'
+import type { FavoriteFolder, RemoteLocation } from '../types/remote'
 
 type LocationItemProps = {
   location: RemoteLocation
   isActive: boolean
+  activeFavoritePath: string
   onSelect: (location: RemoteLocation) => void
+  onSelectFavorite: (location: RemoteLocation, favorite: FavoriteFolder) => void
+  onRemoveFavorite: (
+    location: RemoteLocation,
+    favorite: FavoriteFolder,
+  ) => void
   onEdit: (location: RemoteLocation) => void
   onRemove: (location: RemoteLocation) => void
 }
@@ -12,10 +18,15 @@ type LocationItemProps = {
 export function LocationItem({
   location,
   isActive,
+  activeFavoritePath,
   onSelect,
+  onSelectFavorite,
+  onRemoveFavorite,
   onEdit,
   onRemove,
 }: LocationItemProps) {
+  const favorites = location.favorites ?? []
+
   return (
     <div className="location-item-wrap">
       <button
@@ -50,6 +61,36 @@ export function LocationItem({
           <Trash2 size={14} />
         </button>
       </div>
+      {favorites.length > 0 && (
+        <div className="location-favorites" aria-label={`${location.name} 的收藏目录`}>
+          {favorites.map((favorite) => (
+            <div className="favorite-item-wrap" key={favorite.path}>
+              <button
+                className={`favorite-item${favorite.path === activeFavoritePath ? ' is-active' : ''}`}
+                type="button"
+                title={favorite.path}
+                onClick={() => onSelectFavorite(location, favorite)}
+              >
+                <Star
+                  className="favorite-item-star"
+                  size={12}
+                  fill="currentColor"
+                />
+                <span className="favorite-item-name">{favorite.name}</span>
+              </button>
+              <button
+                className="favorite-remove"
+                type="button"
+                aria-label={`移除收藏 ${favorite.name}`}
+                title="移除收藏"
+                onClick={() => onRemoveFavorite(location, favorite)}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

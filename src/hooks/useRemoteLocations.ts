@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createStoredLocation,
   deleteStoredLocation,
   requestStoredLocations,
   updateStoredLocation,
+  updateStoredLocationFavorites,
 } from '../api/remote'
 import {
   clearLegacyLocationStorage,
   readLegacyLocations,
 } from '../lib/legacyLocations'
-import type { RemoteLocation } from '../types/remote'
+import type { FavoriteFolder, RemoteLocation } from '../types/remote'
 
 export function useRemoteLocations() {
   const [locations, setLocations] = useState<RemoteLocation[]>([])
@@ -112,10 +113,21 @@ export function useRemoteLocations() {
     return remaining
   }
 
-  const selectLocation = (location: RemoteLocation) => {
+  const saveFavorites = async (
+    location: RemoteLocation,
+    favorites: FavoriteFolder[],
+  ) => {
+    const saved = await updateStoredLocationFavorites(location.id, favorites)
+    setLocations((current) =>
+      current.map((item) => (item.id === saved.id ? saved : item)),
+    )
+    return saved
+  }
+
+  const selectLocation = useCallback((location: RemoteLocation) => {
     setActiveLocationId(location.id)
     setError(null)
-  }
+  }, [])
 
   return {
     locations,
@@ -126,6 +138,7 @@ export function useRemoteLocations() {
     setError,
     createLocation,
     saveLocation,
+    saveFavorites,
     removeLocation,
     selectLocation,
   }

@@ -1,17 +1,27 @@
-import { Database, Globe2, Plus, RefreshCw } from 'lucide-react'
+import { Database, Plus, RefreshCw } from 'lucide-react'
 import type { FormEvent } from 'react'
-import type { LocationDraft, RemoteLocation } from '../types/remote'
+import type {
+  FavoriteFolder,
+  LocationDraft,
+  RemoteLocation,
+} from '../types/remote'
 import { LocationForm } from './LocationForm'
 import { LocationItem } from './LocationItem'
 
 type SidebarProps = {
   locations: RemoteLocation[]
   activeLocationId: string | null
+  activeFavoritePath: string
   isLoading: boolean
   formOpen: boolean
   editingLocationId: string | null
   draft: LocationDraft
   onSelect: (location: RemoteLocation) => void
+  onSelectFavorite: (location: RemoteLocation, favorite: FavoriteFolder) => void
+  onRemoveFavorite: (
+    location: RemoteLocation,
+    favorite: FavoriteFolder,
+  ) => void
   onEdit: (location: RemoteLocation) => void
   onRemove: (location: RemoteLocation) => void
   onOpenAdd: () => void
@@ -23,11 +33,14 @@ type SidebarProps = {
 export function Sidebar({
   locations,
   activeLocationId,
+  activeFavoritePath,
   isLoading,
   formOpen,
   editingLocationId,
   draft,
   onSelect,
+  onSelectFavorite,
+  onRemoveFavorite,
   onEdit,
   onRemove,
   onOpenAdd,
@@ -52,7 +65,12 @@ export function Sidebar({
               key={location.id}
               location={location}
               isActive={location.id === activeLocationId}
+              activeFavoritePath={
+                location.id === activeLocationId ? activeFavoritePath : ''
+              }
               onSelect={onSelect}
+              onSelectFavorite={onSelectFavorite}
+              onRemoveFavorite={onRemoveFavorite}
               onEdit={onEdit}
               onRemove={onRemove}
             />
@@ -89,13 +107,6 @@ export function Sidebar({
         )}
       </nav>
 
-      <div className="sidebar-footer">
-        <div className="storage-icon"><Globe2 size={16} /></div>
-        <div>
-          <span className="footer-label">浏览来源</span>
-          <code>远程 SVN 仓库</code>
-        </div>
-      </div>
     </aside>
   )
 }

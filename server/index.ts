@@ -9,6 +9,7 @@ import {
   readLocation,
   readLocations,
   updateLocation,
+  updateLocationFavorites,
   type StoredLocation,
 } from './location-store.js'
 import {
@@ -26,6 +27,25 @@ const app = Fastify({ logger: true })
 const clientDirectory = resolve(process.cwd(), 'dist/client')
 const clientIndex = join(clientDirectory, 'index.html')
 const allowedProtocols = new Set(['http:', 'https:', 'svn:', 'svn+ssh:'])
+const maxComparisonFileBytes = 2 * 1024 * 1024
+const historyPageSize = 50
+
+type SvnLogEntry = {
+  revision: number
+  author?: string
+  modifiedAt?: string
+}
+
+type SvnChangedPath = {
+  path: string
+  action: 'A' | 'M' | 'D' | 'R'
+  kind: 'file' | 'directory'
+}
+
+type SvnHistoryEntry = SvnLogEntry & {
+  message: string
+  files: SvnChangedPath[]
+}
 
 function parseRemoteUrl(value: string) {
   if (!value || value.length > 2048) throw new Error('请输入有效的 SVN 地址')
@@ -82,6 +102,43 @@ function toPublicLocation(
   { password, ...location }: StoredLocation,
 ) {
   return { ...location, hasPassword: Boolean(password ?? '') }
+}
+
+function parseFavoriteFolders(value: unknown) {
+  if (!Array.isArray(value) || value.length > 200) {
+    throw new Error('收藏目录数据无效')
+  }
+
+  const favorites = value.map((favorite) => {
+    if (
+      !favorite ||
+      typeof favorite !== 'object' ||
+      typeof favorite.path !== 'string' ||
+      !isValidCachePath(favorite.path) ||
+      typeof favorite.name !== 'string' ||
+      !favorite.name.trim() ||
+      favorite.name.length > 512 ||
+      (favorite.author !== undefined &&
+        (typeof favorite.author !== 'string' || favorite.author.length > 512)) ||
+      (favorite.modifiedAt !== undefined &&
+        (typeof favorite.modifiedAt !== 'string' ||
+          favorite.modifiedAt.length > 128))
+    ) {
+      throw new Error('收藏目录数据无效')
+    }
+
+    return {
+      path: favorite.path,
+      name: favorite.name.trim(),
+      ...(favorite.author ? { author: favorite.author } : {}),
+      ...(favorite.modifiedAt ? { modifiedAt: favorite.modifiedAt } : {}),
+    }
+  })
+
+  if (new Set(favorites.map((favorite) => favorite.path)).size !== favorites.length) {
+    throw new Error('收藏目录不能重复')
+  }
+  return favorites
 }
 
 function decodeXml(value: string) {
@@ -178,6 +235,258 @@ function runSvnList(targetUrl: string, username?: string, password?: string) {
   })
 }
 
+function sanitizeSvnError(
+  error: Error,
+  stderr: string,
+  username?: string,
+  password?: string,
+) {
+  const errorCode = (error as NodeJS.ErrnoException).code
+  let message =
+    errorCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+      ? `文件过大，在线对比上限为 ${maxComparisonFileBytes / 1024 / 1024} MB`
+      : stderr.trim() || 'SVN command failed'
+
+  for (const secret of [password, username]) {
+    if (secret) message = message.split(secret).join('[隐藏]')
+  }
+  return message.slice(0, 1200)
+}
+
+function runSvnLog(
+  targetUrl: string,
+  username?: string,
+  password?: string,
+  revision?: number,
+) {
+  return new Promise<string>((resolveOutput, reject) => {
+    const args = [
+      'log',
+      '--xml',
+      '--limit',
+      '2',
+      '--non-interactive',
+    ]
+    if (revision) args.push('-r', `${revision}:1`)
+    if (username) args.push('--username', username)
+    if (password) args.push('--password', password, '--no-auth-cache')
+    args.push(`${targetUrl}@${revision ?? 'HEAD'}`)
+
+    execFile(
+      'svn',
+      args,
+      { encoding: 'utf8', timeout: 20_000, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(
+            new Error(
+              sanitizeSvnError(error, String(stderr ?? ''), username, password),
+            ),
+          )
+          return
+        }
+        resolveOutput(stdout)
+      },
+    )
+  })
+}
+
+function runSvnCat(
+  targetUrl: string,
+  revision: number,
+  username?: string,
+  password?: string,
+  pegRevision = 'HEAD',
+) {
+  return new Promise<Buffer>((resolveOutput, reject) => {
+    const args = [
+      'cat',
+      '--non-interactive',
+      '-r',
+      String(revision),
+    ]
+    if (username) args.push('--username', username)
+    if (password) args.push('--password', password, '--no-auth-cache')
+    args.push(`${targetUrl}@${pegRevision}`)
+
+    execFile(
+      'svn',
+      args,
+      {
+        encoding: 'buffer',
+        timeout: 20_000,
+        maxBuffer: maxComparisonFileBytes + 64 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const errorOutput = Buffer.isBuffer(stderr)
+            ? stderr.toString('utf8')
+            : String(stderr ?? '')
+          reject(
+            new Error(
+              sanitizeSvnError(error, errorOutput, username, password),
+            ),
+          )
+          return
+        }
+
+        const output = Buffer.isBuffer(stdout)
+          ? stdout
+          : Buffer.from(String(stdout ?? ''))
+        if (output.length > maxComparisonFileBytes) {
+          reject(
+            new Error(
+              `文件过大，在线对比上限为 ${maxComparisonFileBytes / 1024 / 1024} MB`,
+            ),
+          )
+          return
+        }
+        resolveOutput(output)
+      },
+    )
+  })
+}
+
+function runSvnHistory(
+  targetUrl: string,
+  beforeRevision?: number,
+  username?: string,
+  password?: string,
+) {
+  return new Promise<string>((resolveOutput, reject) => {
+    const args = [
+      'log',
+      '--xml',
+      '--verbose',
+      '--limit',
+      String(historyPageSize + 1),
+      '--non-interactive',
+    ]
+    if (beforeRevision) {
+      args.push('-r', `${beforeRevision - 1}:1`)
+    }
+    if (username) args.push('--username', username)
+    if (password) args.push('--password', password, '--no-auth-cache')
+    args.push(`${targetUrl}@HEAD`)
+
+    execFile(
+      'svn',
+      args,
+      { encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(
+            new Error(
+              sanitizeSvnError(error, String(stderr ?? ''), username, password),
+            ),
+          )
+          return
+        }
+        resolveOutput(stdout)
+      },
+    )
+  })
+}
+
+function parseSvnLogEntries(xml: string): SvnLogEntry[] {
+  const entries: SvnLogEntry[] = []
+  const entryPattern = /<logentry\b([^>]*)>([\s\S]*?)<\/logentry>/g
+
+  for (const match of xml.matchAll(entryPattern)) {
+    const revision = Number(
+      /\brevision="(\d+)"/.exec(match[1] ?? '')?.[1] ?? '',
+    )
+    if (!Number.isSafeInteger(revision) || revision <= 0) continue
+
+    const body = match[2] ?? ''
+    const author = decodeXml(
+      /<author>([\s\S]*?)<\/author>/.exec(body)?.[1] ?? '',
+    ).trim()
+    const date = decodeXml(
+      /<date>([\s\S]*?)<\/date>/.exec(body)?.[1] ?? '',
+    ).trim()
+    const parsedDate = date ? new Date(date) : null
+
+    entries.push({
+      revision,
+      ...(author ? { author } : {}),
+      ...(parsedDate && !Number.isNaN(parsedDate.getTime())
+        ? { modifiedAt: parsedDate.toISOString() }
+        : {}),
+    })
+  }
+
+  return entries.sort((left, right) => right.revision - left.revision)
+}
+
+function parseSvnHistoryEntries(xml: string): SvnHistoryEntry[] {
+  const entries: SvnHistoryEntry[] = []
+  const entryPattern = /<logentry\b([^>]*)>([\s\S]*?)<\/logentry>/g
+
+  for (const match of xml.matchAll(entryPattern)) {
+    const revision = Number(
+      /\brevision="(\d+)"/.exec(match[1] ?? '')?.[1] ?? '',
+    )
+    if (!Number.isSafeInteger(revision) || revision <= 0) continue
+
+    const body = match[2] ?? ''
+    const author = decodeXml(
+      /<author>([\s\S]*?)<\/author>/.exec(body)?.[1] ?? '',
+    ).trim()
+    const date = decodeXml(
+      /<date>([\s\S]*?)<\/date>/.exec(body)?.[1] ?? '',
+    ).trim()
+    const message = decodeXml(
+      /<msg>([\s\S]*?)<\/msg>/.exec(body)?.[1] ?? '',
+    ).trim()
+    const parsedDate = date ? new Date(date) : null
+    const files: SvnChangedPath[] = []
+
+    for (const pathMatch of body.matchAll(
+      /<path\b([^>]*)>([\s\S]*?)<\/path>/g,
+    )) {
+      const attributes = pathMatch[1] ?? ''
+      const path = decodeXml(pathMatch[2] ?? '').trim()
+      const kind =
+        /\bkind="(file|dir)"/.exec(attributes)?.[1] === 'dir'
+          ? 'directory'
+          : 'file'
+      const action = /\baction="([AMDR])"/.exec(attributes)?.[1]
+
+      if (!path.startsWith('/') || path.includes('\\')) continue
+      files.push({
+        path,
+        kind,
+        action: (action as SvnChangedPath['action'] | undefined) ?? 'M',
+      })
+    }
+
+    entries.push({
+      revision,
+      ...(author ? { author } : {}),
+      ...(parsedDate && !Number.isNaN(parsedDate.getTime())
+        ? { modifiedAt: parsedDate.toISOString() }
+        : {}),
+      message: message.slice(0, 4000),
+      files,
+    })
+  }
+
+  return entries.sort((left, right) => right.revision - left.revision)
+}
+
+function decodeSvnFileContent(buffer: Buffer) {
+  if (buffer.includes(0)) {
+    throw new Error('该文件是二进制文件，暂不支持在线代码对比')
+  }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+  } catch {
+    throw new Error('该文件不是 UTF-8 文本，暂不支持在线代码对比')
+  }
+}
+
 function appendRemotePath(baseUrl: string, relativePath: string) {
   if (
     relativePath.length > 2048 ||
@@ -244,6 +553,33 @@ app.put<{ Params: { locationId: string }; Body: Partial<StoredLocation> }>(
     } catch (error) {
       return reply.code(400).send({
         error: error instanceof Error ? error.message : '地址记录无效',
+      })
+    }
+  },
+)
+
+app.put<{
+  Params: { locationId: string }
+  Body: { favorites?: unknown }
+}>(
+  '/api/remote/locations/:locationId/favorites',
+  async (request, reply) => {
+    reply.header('cache-control', 'no-store')
+    if (!isValidLocationId(request.params.locationId)) {
+      return reply.code(400).send({ error: '地址标识无效' })
+    }
+
+    try {
+      const favorites = parseFavoriteFolders(request.body?.favorites)
+      const location = await updateLocationFavorites(
+        request.params.locationId,
+        favorites,
+      )
+      if (!location) return reply.code(404).send({ error: '地址记录不存在' })
+      return { location: toPublicLocation(location) }
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : '无法保存收藏目录',
       })
     }
   },
@@ -468,8 +804,203 @@ app.post<{
     return { entries, cachePersisted }
   } catch (error) {
     app.log.warn({ err: error }, 'Unable to list remote SVN directory')
+    const message =
+      error instanceof Error ? error.message : '无法读取远程 SVN 目录'
+    const pathMissing =
+      /\bW160013\b|\bE200009\b|non-existent in revision/i.test(message)
     return reply.code(502).send({
-      error: error instanceof Error ? error.message : '无法读取远程 SVN 目录',
+      error: message,
+      ...(pathMissing ? { code: 'SVN_PATH_NOT_FOUND' } : {}),
+    })
+  }
+})
+
+app.post<{
+  Body: {
+    locationId?: string
+    url?: string
+    path?: string
+    username?: string
+    revision?: number
+  }
+}>('/api/remote/file', async (request, reply) => {
+  let identity: ReturnType<typeof parseCacheIdentity>
+  let targetUrl: string
+  let revision: number | undefined
+
+  try {
+    identity = parseCacheIdentity(request.body ?? {})
+    if (
+      typeof request.body?.path !== 'string' ||
+      !isValidCachePath(request.body.path)
+    ) {
+      throw new Error('文件路径无效')
+    }
+    revision = request.body.revision
+    if (
+      revision !== undefined &&
+      (!Number.isSafeInteger(revision) || revision <= 0)
+    ) {
+      throw new Error('文件修订版本无效')
+    }
+    targetUrl = appendRemotePath(identity.url, request.body.path)
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : '文件对比请求无效',
+    })
+  }
+
+  try {
+    const storedLocation = await readLocation(identity.locationId)
+    if (
+      storedLocation &&
+      (storedLocation.url !== identity.url ||
+        storedLocation.username !== identity.username)
+    ) {
+      return reply.code(400).send({ error: '地址或用户名与已保存记录不一致' })
+    }
+  } catch (error) {
+    app.log.error({ err: error }, 'Unable to read stored location for file comparison')
+    return reply.code(500).send({ error: '无法读取后端地址记录' })
+  }
+
+  try {
+    const password = await passwordForRequest(
+      identity.locationId,
+      identity.url,
+      identity.username,
+    )
+    const logEntries = parseSvnLogEntries(
+      await runSvnLog(targetUrl, identity.username, password, revision),
+    )
+    if (!logEntries.length) {
+      return reply.code(404).send({ error: '该文件没有可用的 SVN 修订记录' })
+    }
+
+    const currentIndex = Math.max(
+      0,
+      logEntries.findIndex((entry) => entry.revision === revision),
+    )
+    const currentLog = logEntries[currentIndex]!
+    const previousLog = logEntries[currentIndex + 1]
+    const [currentBytes, previousBytes] = await Promise.all([
+      runSvnCat(
+        targetUrl,
+        currentLog.revision,
+        identity.username,
+        password,
+        String(currentLog.revision),
+      ),
+      previousLog
+        ? runSvnCat(
+            targetUrl,
+            previousLog.revision,
+            identity.username,
+            password,
+            String(currentLog.revision),
+          )
+        : Promise.resolve(null),
+    ])
+
+    return {
+      comparison: {
+        path: request.body.path,
+        current: {
+          ...currentLog,
+          content: decodeSvnFileContent(currentBytes),
+        },
+        previous:
+          previousLog && previousBytes
+            ? {
+                ...previousLog,
+                content: decodeSvnFileContent(previousBytes),
+              }
+            : null,
+      },
+    }
+  } catch (error) {
+    app.log.warn({ err: error }, 'Unable to load remote SVN file comparison')
+    return reply.code(502).send({
+      error:
+        error instanceof Error ? error.message : '无法读取远程 SVN 文件内容',
+    })
+  }
+})
+
+app.post<{
+  Body: {
+    locationId?: string
+    url?: string
+    path?: string
+    username?: string
+    beforeRevision?: number
+  }
+}>('/api/remote/file/history', async (request, reply) => {
+  let identity: ReturnType<typeof parseCacheIdentity>
+  let targetUrl: string
+  let beforeRevision: number | undefined
+
+  try {
+    identity = parseCacheIdentity(request.body ?? {})
+    if (
+      typeof request.body?.path !== 'string' ||
+      !isValidCachePath(request.body.path)
+    ) {
+      throw new Error('文件路径无效')
+    }
+    beforeRevision = request.body.beforeRevision
+    if (
+      beforeRevision !== undefined &&
+      (!Number.isSafeInteger(beforeRevision) || beforeRevision <= 1)
+    ) {
+      throw new Error('历史版本游标无效')
+    }
+    targetUrl = appendRemotePath(identity.url, request.body.path)
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : '文件历史请求无效',
+    })
+  }
+
+  try {
+    const storedLocation = await readLocation(identity.locationId)
+    if (
+      storedLocation &&
+      (storedLocation.url !== identity.url ||
+        storedLocation.username !== identity.username)
+    ) {
+      return reply.code(400).send({ error: '地址或用户名与已保存记录不一致' })
+    }
+  } catch (error) {
+    app.log.error({ err: error }, 'Unable to read stored location for file history')
+    return reply.code(500).send({ error: '无法读取后端地址记录' })
+  }
+
+  try {
+    const password = await passwordForRequest(
+      identity.locationId,
+      identity.url,
+      identity.username,
+    )
+    const entries = parseSvnHistoryEntries(
+      await runSvnHistory(
+        targetUrl,
+        beforeRevision,
+        identity.username,
+        password,
+      ),
+    )
+    return {
+      history: {
+        path: request.body.path,
+        entries: entries.slice(0, historyPageSize),
+        hasMore: entries.length > historyPageSize,
+      },
+    }
+  } catch (error) {
+    app.log.warn({ err: error }, 'Unable to load remote SVN file history')
+    return reply.code(502).send({
+      error: error instanceof Error ? error.message : '无法读取远程 SVN 文件历史',
     })
   }
 })
