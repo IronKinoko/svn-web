@@ -11,8 +11,6 @@
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "start": "node server-dist/index.js",
     "lint": "oxlint",
-    "postinstall": "node scripts/sync-material-icons.mjs",
-    "sync:icons": "node scripts/sync-material-icons.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

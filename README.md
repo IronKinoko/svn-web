@@ -24,7 +24,7 @@ pnpm dev
 
 API 默认运行在 `http://localhost:3000`，Vite 开发服务器代理 `/api` 请求到该端口。
 
-文件图标素材位于 `public/material-icons`，由 `material-icon-theme` 依赖生成，不纳入 Git。`pnpm install` 会通过 `postinstall` 自动同步；也可单独执行 `pnpm sync:icons`。
+文件图标由 Vite 插件直接从 `material-icon-theme` 依赖读取：开发服务器按需提供，生产构建时写入 `dist/client/material-icons`，无需安装后的复制步骤。
 
 ## Docker
 
