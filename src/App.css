@@ -553,7 +553,8 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  padding-left: calc(var(--depth, 0) * 19px);
+  /* Each nesting level indents by roughly two English character widths. */
+  padding-left: calc(var(--depth, 0) * 12px);
   color: var(--ink);
   font-weight: 560;
 }
@@ -1072,6 +1073,7 @@
 
 .history-file-tree-directory-button > span {
   overflow: hidden;
+  min-width: 0;
   flex: 1;
   font-family: var(--mono);
   font-size: 9px;
@@ -1136,6 +1138,7 @@
 }
 
 .history-file.history-directory {
+  --marquee-fade-color: #f8faf7;
   cursor: not-allowed;
   opacity: 0.54;
   user-select: none;
@@ -1158,11 +1161,72 @@
 
 .history-file-name {
   overflow: hidden;
+  min-width: 0;
   flex: 1;
   font-family: var(--mono);
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Marquee label: the field is the flex item, the inner text scrolls
+   horizontally when a wide label is revealed on row hover. */
+.marquee-field {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+
+.marquee-text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* While a long label scrolls on hover, drop the ellipsis so the moving text
+   is not clipped with a stray "…" at the trailing edge. */
+.marquee-text.is-marquee-scrolling {
+  text-overflow: clip;
+}
+
+/* Edge fades match the row background and dissolve to transparent. They are
+   only visible while scrolling; the right one disappears once the end is hit. */
+.marquee-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.marquee-fade-left {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    var(--marquee-fade-color, var(--surface, #fff)),
+    transparent
+  );
+}
+
+.marquee-fade-right {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    var(--marquee-fade-color, var(--surface, #fff)),
+    transparent
+  );
+}
+
+.marquee-field.is-marquee-active:not(.is-marquee-at-start) .marquee-fade-left {
+  opacity: 1;
+}
+
+.marquee-field.is-marquee-active:not(.is-marquee-at-end) .marquee-fade-right {
+  opacity: 1;
 }
 
 .history-action {

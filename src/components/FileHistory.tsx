@@ -15,6 +15,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
 import { requestFileComparison, requestFileHistory } from '../api/remote'
@@ -26,6 +27,7 @@ import {
   repositoryRelativePath,
 } from '../lib/revisionPath'
 import { prepareRevisionDiffComparison } from '../lib/revisionDiff'
+import { resetMarquee, startMarquee } from '../lib/marquee'
 import type {
   FileComparison,
   FileHistory as FileHistoryData,
@@ -33,7 +35,11 @@ import type {
   RevisionFileChange,
   TreeRow,
 } from '../types/remote'
+import { MarqueeText } from './MarqueeText'
 import { RevisionDiff } from './RevisionDiff'
+
+// Rows that trigger the slow path scroll on hover (anywhere on the row).
+const MARQUEE_ROW_SELECTOR = '.history-file, .history-file-tree-directory-button'
 
 type FileHistoryProps = {
   location: RemoteLocation
@@ -71,7 +77,8 @@ type ChangedFileTreeNode = {
 
 const FILE_LIST_VIEW_STORAGE_KEY = 'history-file-view'
 // Chevron column plus gap, so same-depth file and folder icons share a column.
-const HISTORY_TREE_INDENT = 19
+// Each nesting level indents by roughly two English character widths.
+const HISTORY_TREE_INDENT = 12
 
 function fileName(path: string) {
   return path.split('/').pop() || path
@@ -141,7 +148,39 @@ function buildChangedFileTree(
   }
   sortNodes(roots)
 
-  return roots
+  return compactChangedFileTree(roots)
+}
+
+// Collapse chains of single-child directories into one combined row, e.g.
+// src → main → java → … → data renders as "src/main/java/…/data" instead of
+// six nested levels. Chains stop as soon as a directory has more than one
+// child, a non-directory child, or carries its own directory change.
+function compactChangedFileTree(
+  nodes: ChangedFileTreeNode[],
+): ChangedFileTreeNode[] {
+  return nodes.map((node) => {
+    if (node.kind !== 'directory') return node
+
+    let compacted: ChangedFileTreeNode = {
+      ...node,
+      children: compactChangedFileTree(node.children),
+    }
+
+    while (
+      compacted.dir === undefined &&
+      compacted.children.length === 1 &&
+      compacted.children[0].kind === 'directory'
+    ) {
+      const onlyChild = compacted.children[0]
+      compacted = {
+        ...onlyChild,
+        name: `${compacted.name}/${onlyChild.name}`,
+        children: onlyChild.children,
+      }
+    }
+
+    return compacted
+  })
 }
 
 function chooseRevisionFile(
@@ -432,7 +471,7 @@ export function FileHistory({
         ) : (
           <FileCode2 size={14} aria-hidden="true" />
         )}
-        <span className="history-file-name">{displayName}</span>
+        <MarqueeText className="history-file-name" text={displayName} />
         <span className={`history-action history-action-${file.action}`}>
           {actionLabels[file.action]}
         </span>
@@ -450,9 +489,10 @@ export function FileHistory({
         aria-disabled="true"
       >
         <Folder size={14} aria-hidden="true" />
-        <span className="history-file-name">
-          {formatRevisionPath(dir.path, location.url)}
-        </span>
+        <MarqueeText
+          className="history-file-name"
+          text={formatRevisionPath(dir.path, location.url)}
+        />
         <span className={`history-action history-action-${dir.action}`}>
           {actionLabels[dir.action]}
         </span>
@@ -478,6 +518,7 @@ export function FileHistory({
                 type="button"
                 onClick={() => toggleFileDirectory(revision, node.path)}
                 aria-expanded={isExpanded}
+                title={node.name}
                 style={{ paddingInlineStart: treeIndent(depth) }}
               >
                 {isExpanded ? (
@@ -490,7 +531,7 @@ export function FileHistory({
                 ) : (
                   <Folder size={14} aria-hidden="true" />
                 )}
-                <span>{node.name}</span>
+                <MarqueeText className="history-directory-name" text={node.name} />
                 {node.dir && (
                   <span
                     className={`history-tree-dir-action history-action history-action-${node.dir.action}`}
@@ -516,6 +557,26 @@ export function FileHistory({
 
   const retryFile = () => {
     setFileRequestVersion((value) => value + 1)
+  }
+
+  // Resolve the marquee element for the row under the pointer. Returns null
+  // when the pointer only moved within the same row (no enter/leave).
+  const marqueeTargetFor = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (!(target instanceof Element)) return null
+    const row = target.closest(MARQUEE_ROW_SELECTOR)
+    if (!row) return null
+    const related = event.relatedTarget
+    if (related instanceof Node && row.contains(related)) return null
+    return row.querySelector<HTMLElement>('.marquee-text')
+  }
+
+  const handleMarqueePointerOver = (event: ReactPointerEvent<HTMLDivElement>) => {
+    startMarquee(marqueeTargetFor(event))
+  }
+
+  const handleMarqueePointerOut = (event: ReactPointerEvent<HTMLDivElement>) => {
+    resetMarquee(marqueeTargetFor(event))
   }
 
   const loadMore = useCallback(async () => {
@@ -671,7 +732,11 @@ export function FileHistory({
               </button>
             </div>
           ) : history?.entries.length ? (
-            <div className="history-revision-list">
+            <div
+              className="history-revision-list"
+              onPointerOver={handleMarqueePointerOver}
+              onPointerOut={handleMarqueePointerOut}
+            >
               {history.entries.map((revision) => {
                 const changedFiles = revision.files.filter(
                   (file) => file.kind === 'file',
