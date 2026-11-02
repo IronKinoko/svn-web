@@ -126,7 +126,3 @@ export function serializeAppRoute(route: AppRoute) {
 
   return search ? `${pathname}?${search}` : pathname
 }
-
-export function sameAppRoute(left: AppRoute, right: AppRoute) {
-  return serializeAppRoute(left) === serializeAppRoute(right)
-}

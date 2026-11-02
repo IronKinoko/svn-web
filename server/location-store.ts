@@ -145,29 +145,6 @@ export async function readLocation(id: string) {
   return database.locations.find((location) => location.id === id) ?? null
 }
 
-export function upsertLocation(
-  input: Pick<StoredLocation, 'id' | 'name' | 'url' | 'username' | 'password'>,
-) {
-  return mutateDatabase((database) => {
-    const existingIndex = database.locations.findIndex(
-      (location) => location.id === input.id,
-    )
-    const location: StoredLocation = {
-      ...input,
-      favorites:
-        existingIndex === -1
-          ? []
-          : database.locations[existingIndex].favorites,
-      updatedAt: new Date().toISOString(),
-    }
-
-    if (existingIndex === -1) database.locations.push(location)
-    else database.locations[existingIndex] = location
-
-    return location
-  })
-}
-
 export function createLocation(
   input: Omit<StoredLocation, 'id' | 'updatedAt' | 'favorites'>,
 ) {

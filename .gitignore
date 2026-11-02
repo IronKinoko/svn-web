@@ -11,13 +11,12 @@ node_modules
 dist
 dist-ssr
 server-dist
+/public/material-icons/
 /data/
 *.local
 .env
 .env.*
 !.env.example
-/workspaces/*
-!/workspaces/.gitkeep
 
 # Editor directories and files
 .vscode/*
