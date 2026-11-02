@@ -9,6 +9,7 @@ export type HistoryAppRoute = {
   page: 'history'
   locationId: string
   path: string
+  kind?: 'file' | 'directory'
   revision?: number
   filePath?: string
   extraSearch?: Array<[string, string]>
@@ -68,11 +69,13 @@ export function parseAppRoute(
           : [viewValue, pathValue].filter(Boolean).join('/')
   const path = normalizeRepositoryPath(rawPath)
   const isHistory = viewValue === 'history' || queryView === 'history'
+  const historyKind = params.get('kind') === 'directory' ? 'directory' : undefined
   const revision = normalizeRevision(params.get('revision'))
   const filePath = normalizeRepositoryPath(params.get('file') ?? undefined)
   const extraSearch = [...params.entries()].filter(
     ([key]) =>
       !['revision', 'file', 'location'].includes(key) &&
+      !(isHistory && key === 'kind') &&
       !(key === 'view' && isLegacyView) &&
       !(key === 'path' && hasLegacyQueryPath),
   )
@@ -82,6 +85,7 @@ export function parseAppRoute(
       page: 'history',
       locationId,
       path,
+      ...(historyKind ? { kind: historyKind } : {}),
       ...(revision ? { revision } : {}),
       ...(filePath ? { filePath } : {}),
       ...(extraSearch.length ? { extraSearch } : {}),
@@ -118,6 +122,7 @@ export function serializeAppRoute(route: AppRoute) {
   const params = new URLSearchParams()
 
   if (route.page === 'history' && locationId && path) {
+    if (route.kind === 'directory') params.set('kind', 'directory')
     if (route.revision) params.set('revision', String(route.revision))
     if (route.filePath) params.set('file', route.filePath)
   }

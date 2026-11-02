@@ -159,6 +159,7 @@ function App() {
       page: 'history',
       locationId: locationsState.activeLocation.id,
       path: entry.path,
+      kind: entry.kind,
       ...(route.extraSearch ? { extraSearch: route.extraSearch } : {}),
     })
   }
@@ -221,7 +222,7 @@ function App() {
     return {
       name: fileName(route.path),
       path: route.path,
-      kind: 'file',
+      kind: route.kind === 'directory' ? 'directory' : 'file',
       depth: 0,
     }
   }, [locationsState.activeLocation, route])
@@ -399,7 +400,7 @@ function App() {
           <Suspense
             fallback={
               <div className="comparison-page">
-                <div className="comparison-state">正在打开文件历史…</div>
+                <div className="comparison-state">正在打开改动历史…</div>
               </div>
             }
           >

@@ -65,6 +65,7 @@ type ChangedFileTreeNode = {
   path: string
   kind: 'directory' | 'file'
   file?: RevisionFileChange
+  dir?: RevisionFileChange
   children: ChangedFileTreeNode[]
 }
 
@@ -90,14 +91,14 @@ function readStoredFileListView(): FileListView {
 }
 
 function buildChangedFileTree(
-  files: RevisionFileChange[],
+  items: RevisionFileChange[],
   baseUrl: string,
 ): ChangedFileTreeNode[] {
   const roots: ChangedFileTreeNode[] = []
 
-  for (const file of files) {
+  for (const item of items) {
     const segments = (
-      formatRevisionPath(file.path, baseUrl) || fileName(file.path)
+      formatRevisionPath(item.path, baseUrl) || fileName(item.path)
     )
       .split('/')
       .filter(Boolean)
@@ -108,7 +109,8 @@ function buildChangedFileTree(
 
     segments.forEach((name, index) => {
       parentPath = parentPath ? `${parentPath}/${name}` : name
-      const kind = index === segments.length - 1 ? 'file' : 'directory'
+      const isLeaf = index === segments.length - 1
+      const kind = isLeaf ? item.kind : 'directory'
       let node = siblings.find(
         (candidate) => candidate.name === name && candidate.kind === kind,
       )
@@ -119,9 +121,10 @@ function buildChangedFileTree(
       }
 
       if (kind === 'directory') {
+        if (isLeaf) node.dir = item
         siblings = node.children
       } else {
-        node.file = file
+        node.file = item
       }
     })
   }
@@ -146,6 +149,7 @@ function chooseRevisionFile(
   entryPath: string,
   baseUrl: string,
   preferredPath?: string,
+  pickDefault = true,
 ) {
   const files = revision.files.filter(
     (file) => file.kind === 'file' && file.action !== 'D',
@@ -156,6 +160,7 @@ function chooseRevisionFile(
     )
     if (preferred) return preferred
   }
+  if (!pickDefault) return undefined
 
   return (
     files.find((file) => isSameRevisionPath(file.path, entryPath, baseUrl)) ??
@@ -172,6 +177,8 @@ export function FileHistory({
   onClose,
   onSelectFile,
 }: FileHistoryProps) {
+  const isDirectory = entry.kind === 'directory'
+  const entrySubject = isDirectory ? '文件夹' : '文件'
   const initialRevision = useRef(revision)
   const [history, setHistory] = useState<FileHistoryData | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
@@ -227,7 +234,7 @@ export function FileHistory({
       .catch((caught: unknown) => {
         if (!cancelled) {
           setHistoryError(
-            caught instanceof Error ? caught.message : '无法读取文件历史',
+            caught instanceof Error ? caught.message : `无法读取${entrySubject}历史`,
           )
         }
       })
@@ -238,7 +245,7 @@ export function FileHistory({
     return () => {
       cancelled = true
     }
-  }, [entry.path, historyRequestVersion, location])
+  }, [entry.path, entrySubject, historyRequestVersion, location])
 
   const selectedRevisionEntry = useMemo(
     () =>
@@ -352,6 +359,7 @@ export function FileHistory({
       entry.path,
       location.url,
       selectedFilePath,
+      !isDirectory,
     )
     onSelectFile(
       revisionEntry.revision,
@@ -432,6 +440,26 @@ export function FileHistory({
     )
   }
 
+  const renderDirectoryItem = (dir: RevisionFileChange) => {
+    const repositoryPath = repositoryRelativePath(dir.path, location.url)
+    return (
+      <div
+        key={dir.path}
+        className="history-file history-directory"
+        title={`${repositoryPath}（目录，无法查看文件差异）`}
+        aria-disabled="true"
+      >
+        <Folder size={14} aria-hidden="true" />
+        <span className="history-file-name">
+          {formatRevisionPath(dir.path, location.url)}
+        </span>
+        <span className={`history-action history-action-${dir.action}`}>
+          {actionLabels[dir.action]}
+        </span>
+      </div>
+    )
+  }
+
   const renderFileTree = (
     nodes: ChangedFileTreeNode[],
     revision: number,
@@ -463,6 +491,13 @@ export function FileHistory({
                   <Folder size={14} aria-hidden="true" />
                 )}
                 <span>{node.name}</span>
+                {node.dir && (
+                  <span
+                    className={`history-tree-dir-action history-action history-action-${node.dir.action}`}
+                  >
+                    {actionLabels[node.dir.action]}
+                  </span>
+                )}
               </button>
               {isExpanded && renderFileTree(node.children, revision, depth + 1)}
             </li>
@@ -552,6 +587,7 @@ export function FileHistory({
       entry.path,
       location.url,
       selectedFilePath,
+      !isDirectory,
     )
     const targetFilePath = targetFile
       ? repositoryRelativePath(targetFile.path, location.url)
@@ -566,6 +602,7 @@ export function FileHistory({
   }, [
     entry.path,
     history,
+    isDirectory,
     isHistoryLoading,
     location.url,
     onCanonicalizeSelection,
@@ -582,10 +619,10 @@ export function FileHistory({
       className="history-page"
       role="dialog"
       aria-modal="true"
-      aria-label={`文件历史：${entry.name}`}
+      aria-label={`${entrySubject}历史：${entry.name}`}
     >
       <div className="history-layout">
-        <aside className="history-panel" aria-label="文件改动历史">
+        <aside className="history-panel" aria-label="改动历史">
           <div className="history-panel-head">
             <div>
               <strong>改动历史</strong>
@@ -639,6 +676,9 @@ export function FileHistory({
                 const changedFiles = revision.files.filter(
                   (file) => file.kind === 'file',
                 )
+                // Folder history also surfaces directory changes (e.g. a tag
+                // created by copying a directory), which have no file entry.
+                const changedItems = isDirectory ? revision.files : changedFiles
                 const isExpanded = expandedRevision === revision.revision
 
                 return (
@@ -665,7 +705,9 @@ export function FileHistory({
                           <strong>{revision.author || '未知作者'}</strong>
                           <span>{formatModifiedAt(revision.modifiedAt)}</span>
                           <span className="history-file-count">
-                            {changedFiles.length} 个文件
+                            {isDirectory
+                              ? `${changedItems.length} 项变更`
+                              : `${changedFiles.length} 个文件`}
                           </span>
                         </span>
                         <span
@@ -680,15 +722,17 @@ export function FileHistory({
                       <div className="history-changed-files">
                         {fileListView === 'tree'
                           ? renderFileTree(
-                              buildChangedFileTree(changedFiles, location.url),
+                              buildChangedFileTree(changedItems, location.url),
                               revision.revision,
                             )
-                          : changedFiles.map((file) =>
-                              renderFileButton(
-                                file,
-                                revision.revision,
-                                formatRevisionPath(file.path, location.url),
-                              ),
+                          : changedItems.map((item) =>
+                              item.kind === 'directory'
+                                ? renderDirectoryItem(item)
+                                : renderFileButton(
+                                    item,
+                                    revision.revision,
+                                    formatRevisionPath(item.path, location.url),
+                                  ),
                             )}
                       </div>
                     )}
@@ -715,11 +759,11 @@ export function FileHistory({
               )}
             </div>
           ) : (
-            <div className="history-panel-state">该文件没有可显示的历史记录。</div>
+            <div className="history-panel-state">该{entrySubject}没有可显示的历史记录。</div>
           )}
         </aside>
 
-        <section className="history-code-panel" aria-label="文件代码">
+        <section className="history-code-panel" aria-label={isDirectory ? '变更文件' : '文件代码'}>
           <div className="history-code-head">
             {selectedFile ? (
               <>
@@ -741,10 +785,10 @@ export function FileHistory({
             ) : (
               <>
                 <span className="history-code-icon">
-                  <FileCode2 size={15} />
+                  {isDirectory ? <Folder size={15} /> : <FileCode2 size={15} />}
                 </span>
                 <div>
-                  <strong>文件代码</strong>
+                  <strong>{isDirectory ? '文件夹内容' : '文件代码'}</strong>
                   <span>{entryDisplayPath}</span>
                 </div>
               </>
@@ -753,7 +797,7 @@ export function FileHistory({
               className="comparison-close"
               type="button"
               onClick={onClose}
-              aria-label="关闭文件历史"
+              aria-label={`关闭${entrySubject}历史`}
               title="关闭"
             >
               <X size={19} />

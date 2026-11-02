@@ -103,16 +103,14 @@ export function TreeRow({
   }
 
   const menuItems: ContextMenuItem[] = [
-    ...(!isDirectory
+    {
+      key: 'history',
+      label: '查看改动历史',
+      icon: <HistoryIcon size={14} />,
+      onSelect: () => onHistory(entry),
+    },
+    ...(isDirectory
       ? [
-          {
-            key: 'history',
-            label: '查看改动历史',
-            icon: <HistoryIcon size={14} />,
-            onSelect: () => onHistory(entry),
-          },
-        ]
-      : [
           {
             key: 'favorite',
             label: isFavorite ? '取消收藏此文件夹' : '收藏此文件夹',
@@ -124,7 +122,8 @@ export function TreeRow({
             ),
             onSelect: () => onToggleFavorite(entry),
           },
-        ]),
+        ]
+      : []),
     {
       key: 'copy',
       label: '复制 SVN 链接',

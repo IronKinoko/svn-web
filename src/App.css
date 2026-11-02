@@ -1089,6 +1089,13 @@
   color: #82937c;
 }
 
+.history-file-tree-directory-button > .history-tree-dir-action {
+  flex: 0 0 auto;
+  overflow: visible;
+  font-size: 8px;
+  text-overflow: clip;
+}
+
 .history-file {
   display: flex;
   width: 100%;
@@ -1096,7 +1103,7 @@
   height: 31px;
   align-items: center;
   gap: 7px;
-  padding: 0 7px 0 25px;
+  padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -1126,6 +1133,21 @@
 .history-file:disabled {
   cursor: not-allowed;
   opacity: 0.54;
+}
+
+.history-file.history-directory {
+  cursor: not-allowed;
+  opacity: 0.54;
+  user-select: none;
+}
+
+.history-file.history-directory:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.history-file.history-directory svg {
+  flex: 0 0 auto;
 }
 
 .history-file img {
