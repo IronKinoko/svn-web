@@ -26,7 +26,7 @@ import {
 import { isValidLocationId } from './location-id.js'
 
 const app = Fastify({ logger: true })
-const clientDirectory = resolve(process.cwd(), 'dist/client')
+const clientDirectory = resolve(process.env.SVN_DESK_CLIENT_DIR ?? 'dist/client')
 const clientIndex = join(clientDirectory, 'index.html')
 const allowedProtocols = new Set(['http:', 'https:', 'svn:', 'svn+ssh:'])
 const maxComparisonFileBytes = 2 * 1024 * 1024

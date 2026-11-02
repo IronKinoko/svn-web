@@ -1,6 +1,5 @@
 node_modules
 dist
-server-dist
 public/material-icons
 .git
 .env
