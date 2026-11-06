@@ -1018,7 +1018,7 @@ try {
   if (migratedLocationCount || removedCacheCount) {
     app.log.info(
       { migratedLocationCount, removedCacheCount },
-      'Migrated remote location IDs to six-character IDs',
+      'Migrated remote location IDs to two-character IDs',
     )
   }
 
