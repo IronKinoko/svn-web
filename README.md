@@ -38,18 +38,22 @@ docker compose up --build
 
 ## API
 
+所有接口都按 REST 语义以 `locations` 资源组织：地址读取/更新/删除使用标准 `GET` / `PUT` / `DELETE`，远程目录、文件与缓存作为地址的子资源，只通过 `locationId` 定位地址，读取类操作使用 `GET` + 查询参数。
+
 - `GET /api/health`：服务健康状态
-- `GET /api/remote/locations`：读取后端地址记录，不返回密码，仅返回 `hasPassword`
-- `POST /api/remote/locations`：新增后端地址记录
-- `PUT /api/remote/locations/:locationId`：更新后端地址记录；省略 `password` 时保留原密码
-- `PUT /api/remote/locations/:locationId/favorites`：更新该地址下收藏的目录列表
-- `DELETE /api/remote/locations/:locationId`：删除地址记录及对应目录快照
-- `POST /api/remote/tree`：JSON 请求体包含 `locationId`、`url`、`path`、`username`，后端使用已保存密码列出远程目录直接子项并更新快照
-- `POST /api/remote/file`：JSON 请求体包含 `locationId`、`url`、`path`、`username`，可传 `revision` 读取指定修订版本及上一版本供前端逐行对比
-- `POST /api/remote/file/history`：读取文件修订历史及每个修订涉及的变更文件，可使用 `beforeRevision` 分页加载更早记录
-- `POST /api/remote/cache/read`：读取指定地址的完整目录快照
-- `PUT /api/remote/cache/expanded`：更新指定地址的展开路径
-- `DELETE /api/remote/cache/:locationId`：清除指定地址的目录快照
+- `GET /api/locations`：读取地址记录列表，不返回密码，仅返回 `hasPassword`
+- `POST /api/locations`：新增地址记录
+- `GET /api/locations/:locationId`：读取单个地址记录
+- `PUT /api/locations/:locationId`：更新地址记录；省略 `password` 时保留原密码
+- `PUT /api/locations/:locationId/favorites`：替换该地址下收藏的目录列表
+- `DELETE /api/locations/:locationId`：删除地址记录及对应目录缓存
+- `GET /api/locations/:locationId/tree?path=`：列出远程目录直接子项并更新缓存
+- `GET /api/locations/:locationId/file?path=&revision=`：读取指定修订版本及上一版本供前端逐行对比
+- `GET /api/locations/:locationId/file/history?path=&beforeRevision=`：读取文件修订历史及每个修订涉及的变更文件，可用 `beforeRevision` 分页加载更早记录
+- `GET /api/locations/:locationId/cache`：读取该地址的完整目录缓存
+- `PUT /api/locations/:locationId/cache/expanded`：替换该地址的展开路径列表
+- `DELETE /api/locations/:locationId/cache/entries?path=`：清除指定目录子树的服务端缓存
+- `DELETE /api/locations/:locationId/cache`：清除该地址的目录缓存
 
 远程目录通过参数化的 `svn list --xml --depth immediates` 调用读取，不经 shell 执行。服务只接受 `http`、`https`、`svn` 和 `svn+ssh` 协议。
 

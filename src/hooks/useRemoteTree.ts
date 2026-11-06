@@ -87,11 +87,9 @@ export function useRemoteTree({
           expandedKey.startsWith(locationCachePrefix(location.id)),
         )
         .map((expandedKey) => expandedKey.slice(location.id.length + 1))
-      void savePersistentExpandedPaths(
-        location,
-        location.username,
-        expandedPaths,
-      ).catch(() => undefined)
+      void savePersistentExpandedPaths(location, expandedPaths).catch(
+        () => undefined,
+      )
       void invalidatePersistentTreeSubtree(location, path).catch(
         () => undefined,
       )
@@ -117,7 +115,7 @@ export function useRemoteTree({
     const prefix = locationCachePrefix(location.id)
     const rootKey = treeKey(location.id, '')
 
-    void requestPersistentTreeCache(location, location.username)
+    void requestPersistentTreeCache(location)
       .then((persistent) => {
         if (cancelled) return
         const restoredCache = persistent
@@ -340,11 +338,9 @@ export function useRemoteTree({
       const expandedPaths = [...nextExpanded]
         .filter((key) => key.startsWith(prefix))
         .map((key) => key.slice(activeLocation.id.length + 1))
-      void savePersistentExpandedPaths(
-        activeLocation,
-        activeLocation.username,
-        expandedPaths,
-      ).catch(() => undefined)
+      void savePersistentExpandedPaths(activeLocation, expandedPaths).catch(
+        () => undefined,
+      )
     }
     if (!nextPath) return
 
@@ -374,13 +370,11 @@ export function useRemoteTree({
     const expandedPaths = [...next]
       .filter((expandedKey) => expandedKey.startsWith(locationCachePrefix(activeLocation.id)))
       .map((expandedKey) => expandedKey.slice(activeLocation.id.length + 1))
-    void savePersistentExpandedPaths(
-      activeLocation,
-      activeLocation.username,
-      expandedPaths,
-    ).catch((caught: unknown) => {
-      reportError(caught instanceof Error ? caught.message : '无法保存已展开目录')
-    })
+    void savePersistentExpandedPaths(activeLocation, expandedPaths).catch(
+      (caught: unknown) => {
+        reportError(caught instanceof Error ? caught.message : '无法保存已展开目录')
+      },
+    )
     if (!isOpen || shouldRetry) void loadDirectory(activeLocation, entry.path)
   }
 
@@ -423,15 +417,13 @@ export function useRemoteTree({
         const expandedPaths = [...nextExpanded]
           .filter((key) => key.startsWith(`${location.id}:`))
           .map((key) => key.slice(location.id.length + 1))
-        void savePersistentExpandedPaths(
-          location,
-          location.username,
-          expandedPaths,
-        ).catch((caught: unknown) => {
-          reportError(
-            caught instanceof Error ? caught.message : '无法保存已展开目录',
-          )
-        })
+        void savePersistentExpandedPaths(location, expandedPaths).catch(
+          (caught: unknown) => {
+            reportError(
+              caught instanceof Error ? caught.message : '无法保存已展开目录',
+            )
+          },
+        )
       }
       setExpandedReload((current) => current + 1)
       reportError(

@@ -507,7 +507,7 @@ function appendRemotePath(baseUrl: string, relativePath: string) {
 
 app.get('/api/health', async () => ({ status: 'ok' }))
 
-app.get('/api/remote/locations', async (_request, reply) => {
+app.get('/api/locations', async (_request, reply) => {
   reply.header('cache-control', 'no-store')
   try {
     return {
@@ -519,20 +519,38 @@ app.get('/api/remote/locations', async (_request, reply) => {
   }
 })
 
+app.get<{ Params: { locationId: string } }>(
+  '/api/locations/:locationId',
+  async (request, reply) => {
+    reply.header('cache-control', 'no-store')
+    if (!isValidLocationId(request.params.locationId)) {
+      return reply.code(400).send({ error: '地址标识无效' })
+    }
+    try {
+      const location = await readLocation(request.params.locationId)
+      if (!location) return reply.code(404).send({ error: '地址记录不存在' })
+      return { location: toPublicLocation(location) }
+    } catch (error) {
+      app.log.error({ err: error }, 'Unable to read remote location')
+      return reply.code(500).send({ error: '无法读取后端地址记录' })
+    }
+  },
+)
+
 app.post<{ Body: Partial<StoredLocation> }>(
-  '/api/remote/locations',
+  '/api/locations',
   async (request, reply) => {
     reply.header('cache-control', 'no-store')
     try {
       const input = parseStoredLocation(request.body ?? {})
-      return {
+      return reply.code(201).send({
         location: toPublicLocation(
           await createLocation({
             ...input,
             password: input.password ?? '',
           }),
         ),
-      }
+      })
     } catch (error) {
       return reply.code(400).send({
         error: error instanceof Error ? error.message : '地址记录无效',
@@ -542,7 +560,7 @@ app.post<{ Body: Partial<StoredLocation> }>(
 )
 
 app.put<{ Params: { locationId: string }; Body: Partial<StoredLocation> }>(
-  '/api/remote/locations/:locationId',
+  '/api/locations/:locationId',
   async (request, reply) => {
     reply.header('cache-control', 'no-store')
     try {
@@ -564,7 +582,7 @@ app.put<{
   Params: { locationId: string }
   Body: { favorites?: unknown }
 }>(
-  '/api/remote/locations/:locationId/favorites',
+  '/api/locations/:locationId/favorites',
   async (request, reply) => {
     reply.header('cache-control', 'no-store')
     if (!isValidLocationId(request.params.locationId)) {
@@ -588,7 +606,7 @@ app.put<{
 )
 
 app.delete<{ Params: { locationId: string } }>(
-  '/api/remote/locations/:locationId',
+  '/api/locations/:locationId',
   async (request, reply) => {
     reply.header('cache-control', 'no-store')
     if (!isValidLocationId(request.params.locationId)) {
@@ -606,124 +624,129 @@ app.delete<{ Params: { locationId: string } }>(
   },
 )
 
-function parseCacheIdentity(
-  body: { locationId?: string; url?: string; username?: string },
-) {
-  if (
-    typeof body.locationId !== 'string' ||
-    !isValidLocationId(body.locationId) ||
-    typeof body.url !== 'string' ||
-    (body.username !== undefined &&
-      (typeof body.username !== 'string' || body.username.length > 512))
-  ) {
-    throw new Error('缓存地址信息无效')
+function parseLocationIdParam(value: string | undefined, message: string) {
+  if (typeof value !== 'string' || !isValidLocationId(value)) {
+    throw new Error(message)
   }
-
-  return {
-    locationId: body.locationId,
-    url: parseRemoteUrl(body.url),
-    username: body.username ?? '',
-  }
+  return value
 }
 
-async function passwordForRequest(
-  locationId: string,
-  url: string,
-  username: string,
-) {
-  const stored = await readLocation(locationId)
-  if (!stored || stored.url !== url || stored.username !== username) return ''
-  return stored.password ?? ''
+function parseOptionalInteger(value: unknown, message: string) {
+  if (value === undefined) return undefined
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isSafeInteger(parsed)) throw new Error(message)
+  return parsed
 }
 
-app.post<{
-  Body: { locationId?: string; url?: string; username?: string }
-}>('/api/remote/cache/read', async (request, reply) => {
+app.get<{
+  Params: { locationId: string }
+}>('/api/locations/:locationId/cache', async (request, reply) => {
+  reply.header('cache-control', 'no-store')
+  let locationId: string
   try {
-    const identity = parseCacheIdentity(request.body ?? {})
-    return {
-      cache: await readTreeCache(
-        identity.locationId,
-        identity.url,
-        identity.username,
-      ),
-    }
+    locationId = parseLocationIdParam(request.params.locationId, '地址标识无效')
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : '缓存请求无效',
     })
+  }
+
+  try {
+    const stored = await readLocation(locationId)
+    if (!stored) return reply.code(404).send({ error: '地址记录不存在' })
+    return {
+      cache: await readTreeCache(locationId, stored.url, stored.username),
+    }
+  } catch (error) {
+    app.log.error({ err: error }, 'Unable to read remote tree cache')
+    return reply.code(500).send({ error: '无法读取后端目录缓存' })
   }
 })
 
 app.put<{
+  Params: { locationId: string }
   Body: {
-    locationId?: string
-    url?: string
-    username?: string
     expandedPaths?: string[]
   }
-}>('/api/remote/cache/expanded', async (request, reply) => {
+}>('/api/locations/:locationId/cache/expanded', async (request, reply) => {
+  reply.header('cache-control', 'no-store')
+  let locationId: string
   try {
-    const identity = parseCacheIdentity(request.body ?? {})
-    const { expandedPaths } = request.body ?? {}
-    if (
-      !Array.isArray(expandedPaths) ||
-      expandedPaths.length > 10_000 ||
-      expandedPaths.some(
-        (path) => typeof path !== 'string' || !isValidCachePath(path),
-      )
-    ) {
-      return reply.code(400).send({ error: '展开目录记录无效' })
-    }
-
-    await cacheExpandedPaths(
-      identity.locationId,
-      identity.url,
-      identity.username,
-      expandedPaths,
-    )
-    return { saved: true }
+    locationId = parseLocationIdParam(request.params.locationId, '地址标识无效')
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : '缓存请求无效',
     })
   }
+
+  const { expandedPaths } = request.body ?? {}
+  if (
+    !Array.isArray(expandedPaths) ||
+    expandedPaths.length > 10_000 ||
+    expandedPaths.some(
+      (path) => typeof path !== 'string' || !isValidCachePath(path),
+    )
+  ) {
+    return reply.code(400).send({ error: '展开目录记录无效' })
+  }
+
+  try {
+    const stored = await readLocation(locationId)
+    if (!stored) return reply.code(404).send({ error: '地址记录不存在' })
+    await cacheExpandedPaths(
+      locationId,
+      stored.url,
+      stored.username,
+      expandedPaths,
+    )
+    return { saved: true }
+  } catch (error) {
+    app.log.error({ err: error }, 'Unable to persist expanded tree paths')
+    return reply.code(500).send({ error: '无法保存已展开目录' })
+  }
 })
 
-app.post<{
-  Body: {
-    locationId?: string
-    url?: string
-    username?: string
-    path?: string
-  }
-}>('/api/remote/cache/invalidate', async (request, reply) => {
+app.delete<{
+  Params: { locationId: string }
+  Querystring: { path?: string }
+}>('/api/locations/:locationId/cache/entries', async (request, reply) => {
+  reply.header('cache-control', 'no-store')
+  let locationId: string
   try {
-    const identity = parseCacheIdentity(request.body ?? {})
-    const { path } = request.body ?? {}
-    if (typeof path !== 'string' || !isValidCachePath(path, true)) {
-      return reply.code(400).send({ error: '缓存目录路径无效' })
-    }
-
-    const invalidated = await invalidateTreeCacheSubtree(
-      identity.locationId,
-      identity.url,
-      identity.username,
-      path,
-    )
-    return { invalidated }
+    locationId = parseLocationIdParam(request.params.locationId, '地址标识无效')
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : '缓存刷新请求无效',
     })
   }
+
+  const { path } = request.query
+  if (typeof path !== 'string' || !isValidCachePath(path, true)) {
+    return reply.code(400).send({ error: '缓存目录路径无效' })
+  }
+
+  try {
+    const stored = await readLocation(locationId)
+    if (!stored) return reply.code(404).send({ error: '地址记录不存在' })
+    const invalidated = await invalidateTreeCacheSubtree(
+      locationId,
+      stored.url,
+      stored.username,
+      path,
+    )
+    return { invalidated }
+  } catch (error) {
+    app.log.error({ err: error }, 'Unable to invalidate tree cache subtree')
+    return reply.code(500).send({ error: '无法刷新目录缓存' })
+  }
 })
 
 app.delete<{ Params: { locationId: string } }>(
-  '/api/remote/cache/:locationId',
+  '/api/locations/:locationId/cache',
   async (request, reply) => {
+    reply.header('cache-control', 'no-store')
     if (!isValidLocationId(request.params.locationId)) {
-      return reply.code(400).send({ error: '缓存地址信息无效' })
+      return reply.code(400).send({ error: '地址标识无效' })
     }
     try {
       await clearTreeCache(request.params.locationId)
@@ -734,69 +757,50 @@ app.delete<{ Params: { locationId: string } }>(
   },
 )
 
-app.post<{
-  Body: {
-    locationId?: string
-    url?: string
-    path?: string
-    username?: string
-    password?: string
-  }
-}>('/api/remote/tree', async (request, reply) => {
-  let baseUrl: string
-  let targetUrl: string
+app.get<{
+  Params: { locationId: string }
+  Querystring: { path?: string }
+}>('/api/locations/:locationId/tree', async (request, reply) => {
+  reply.header('cache-control', 'no-store')
+  let locationId: string
   try {
-    if (
-      typeof request.body?.locationId !== 'string' ||
-      !isValidLocationId(request.body.locationId)
-    ) {
-      throw new Error('缓存地址信息无效')
-    }
-    baseUrl = parseRemoteUrl(request.body?.url ?? '')
-    targetUrl = appendRemotePath(baseUrl, request.body?.path ?? '')
+    locationId = parseLocationIdParam(request.params.locationId, '地址标识无效')
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : '请求参数无效',
     })
   }
 
-  const { username } = request.body ?? {}
+  const path = request.query.path ?? ''
 
+  let stored: StoredLocation | null = null
   try {
-    const storedLocation = await readLocation(request.body.locationId!)
-    if (
-      storedLocation &&
-      (storedLocation.url !== baseUrl || storedLocation.username !== (username ?? ''))
-    ) {
-      return reply.code(400).send({ error: '地址或用户名与已保存记录不一致' })
-    }
+    stored = await readLocation(locationId)
   } catch (error) {
     app.log.error({ err: error }, 'Unable to read stored location for SVN request')
     return reply.code(500).send({ error: '无法读取后端地址记录' })
   }
+  if (!stored) return reply.code(404).send({ error: '地址记录不存在' })
 
-  if (
-    username !== undefined &&
-      (typeof username !== 'string' || username.length > 512)
-  ) {
-    return reply.code(400).send({ error: '用户名长度无效' })
+  let targetUrl: string
+  try {
+    targetUrl = appendRemotePath(stored.url, path)
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : '请求参数无效',
+    })
   }
 
   try {
-    const effectivePassword = await passwordForRequest(
-      request.body.locationId!,
-      baseUrl,
-      username ?? '',
-    )
-    const xml = await runSvnList(targetUrl, username, effectivePassword)
-    const entries = parseSvnEntries(xml, request.body?.path ?? '')
+    const xml = await runSvnList(targetUrl, stored.username, stored.password)
+    const entries = parseSvnEntries(xml, path)
     let cachePersisted = true
     try {
       await cacheDirectory(
-        request.body.locationId!,
-        baseUrl,
-        username ?? '',
-        request.body.path ?? '',
+        locationId,
+        stored.url,
+        stored.username,
+        path,
         entries,
       )
     } catch (error) {
@@ -817,35 +821,19 @@ app.post<{
   }
 })
 
-app.post<{
-  Body: {
-    locationId?: string
-    url?: string
-    path?: string
-    username?: string
-    revision?: number
-  }
-}>('/api/remote/file', async (request, reply) => {
-  let identity: ReturnType<typeof parseCacheIdentity>
+app.get<{
+  Params: { locationId: string }
+  Querystring: { path?: string; revision?: string }
+}>('/api/locations/:locationId/file', async (request, reply) => {
+  reply.header('cache-control', 'no-store')
+  let locationId: string
+  let stored: StoredLocation | null = null
   let targetUrl: string
+  let filePath: string
   let revision: number | undefined
 
   try {
-    identity = parseCacheIdentity(request.body ?? {})
-    if (
-      typeof request.body?.path !== 'string' ||
-      !isValidCachePath(request.body.path)
-    ) {
-      throw new Error('文件路径无效')
-    }
-    revision = request.body.revision
-    if (
-      revision !== undefined &&
-      (!Number.isSafeInteger(revision) || revision <= 0)
-    ) {
-      throw new Error('文件修订版本无效')
-    }
-    targetUrl = appendRemotePath(identity.url, request.body.path)
+    locationId = parseLocationIdParam(request.params.locationId, '地址标识无效')
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : '文件对比请求无效',
@@ -853,27 +841,32 @@ app.post<{
   }
 
   try {
-    const storedLocation = await readLocation(identity.locationId)
-    if (
-      storedLocation &&
-      (storedLocation.url !== identity.url ||
-        storedLocation.username !== identity.username)
-    ) {
-      return reply.code(400).send({ error: '地址或用户名与已保存记录不一致' })
-    }
+    stored = await readLocation(locationId)
   } catch (error) {
     app.log.error({ err: error }, 'Unable to read stored location for file comparison')
     return reply.code(500).send({ error: '无法读取后端地址记录' })
   }
+  if (!stored) return reply.code(404).send({ error: '地址记录不存在' })
 
   try {
-    const password = await passwordForRequest(
-      identity.locationId,
-      identity.url,
-      identity.username,
-    )
+    filePath = request.query.path as string
+    if (typeof filePath !== 'string' || !isValidCachePath(filePath)) {
+      throw new Error('文件路径无效')
+    }
+    revision = parseOptionalInteger(request.query.revision, '文件修订版本无效')
+    if (revision !== undefined && revision <= 0) {
+      throw new Error('文件修订版本无效')
+    }
+    targetUrl = appendRemotePath(stored.url, filePath)
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : '文件对比请求无效',
+    })
+  }
+
+  try {
     const logEntries = parseSvnLogEntries(
-      await runSvnLog(targetUrl, identity.username, password, revision),
+      await runSvnLog(targetUrl, stored.username, stored.password, revision),
     )
     if (!logEntries.length) {
       return reply.code(404).send({ error: '该文件没有可用的 SVN 修订记录' })
@@ -889,16 +882,16 @@ app.post<{
       runSvnCat(
         targetUrl,
         currentLog.revision,
-        identity.username,
-        password,
+        stored.username,
+        stored.password,
         String(currentLog.revision),
       ),
       previousLog
         ? runSvnCat(
             targetUrl,
             previousLog.revision,
-            identity.username,
-            password,
+            stored.username,
+            stored.password,
             String(currentLog.revision),
           )
         : Promise.resolve(null),
@@ -906,7 +899,7 @@ app.post<{
 
     return {
       comparison: {
-        path: request.body.path,
+        path: filePath,
         current: {
           ...currentLog,
           content: decodeSvnFileContent(currentBytes),
@@ -929,35 +922,19 @@ app.post<{
   }
 })
 
-app.post<{
-  Body: {
-    locationId?: string
-    url?: string
-    path?: string
-    username?: string
-    beforeRevision?: number
-  }
-}>('/api/remote/file/history', async (request, reply) => {
-  let identity: ReturnType<typeof parseCacheIdentity>
+app.get<{
+  Params: { locationId: string }
+  Querystring: { path?: string; beforeRevision?: string }
+}>('/api/locations/:locationId/file/history', async (request, reply) => {
+  reply.header('cache-control', 'no-store')
+  let locationId: string
+  let stored: StoredLocation | null = null
   let targetUrl: string
+  let filePath: string
   let beforeRevision: number | undefined
 
   try {
-    identity = parseCacheIdentity(request.body ?? {})
-    if (
-      typeof request.body?.path !== 'string' ||
-      !isValidCachePath(request.body.path)
-    ) {
-      throw new Error('文件路径无效')
-    }
-    beforeRevision = request.body.beforeRevision
-    if (
-      beforeRevision !== undefined &&
-      (!Number.isSafeInteger(beforeRevision) || beforeRevision <= 1)
-    ) {
-      throw new Error('历史版本游标无效')
-    }
-    targetUrl = appendRemotePath(identity.url, request.body.path)
+    locationId = parseLocationIdParam(request.params.locationId, '地址标识无效')
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : '文件历史请求无效',
@@ -965,36 +942,44 @@ app.post<{
   }
 
   try {
-    const storedLocation = await readLocation(identity.locationId)
-    if (
-      storedLocation &&
-      (storedLocation.url !== identity.url ||
-        storedLocation.username !== identity.username)
-    ) {
-      return reply.code(400).send({ error: '地址或用户名与已保存记录不一致' })
-    }
+    stored = await readLocation(locationId)
   } catch (error) {
     app.log.error({ err: error }, 'Unable to read stored location for file history')
     return reply.code(500).send({ error: '无法读取后端地址记录' })
   }
+  if (!stored) return reply.code(404).send({ error: '地址记录不存在' })
 
   try {
-    const password = await passwordForRequest(
-      identity.locationId,
-      identity.url,
-      identity.username,
+    filePath = request.query.path as string
+    if (typeof filePath !== 'string' || !isValidCachePath(filePath)) {
+      throw new Error('文件路径无效')
+    }
+    beforeRevision = parseOptionalInteger(
+      request.query.beforeRevision,
+      '历史版本游标无效',
     )
+    if (beforeRevision !== undefined && beforeRevision <= 1) {
+      throw new Error('历史版本游标无效')
+    }
+    targetUrl = appendRemotePath(stored.url, filePath)
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : '文件历史请求无效',
+    })
+  }
+
+  try {
     const entries = parseSvnHistoryEntries(
       await runSvnHistory(
         targetUrl,
         beforeRevision,
-        identity.username,
-        password,
+        stored.username,
+        stored.password,
       ),
     )
     return {
       history: {
-        path: request.body.path,
+        path: filePath,
         entries: entries.slice(0, historyPageSize),
         hasMore: entries.length > historyPageSize,
       },

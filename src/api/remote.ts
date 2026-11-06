@@ -20,7 +20,7 @@ async function readJson<T>(response: Response) {
 }
 
 export async function requestStoredLocations(): Promise<RemoteLocation[]> {
-  const response = await fetch('/api/remote/locations', {
+  const response = await fetch('/api/locations', {
     headers: { accept: 'application/json' },
     cache: 'no-store',
   })
@@ -32,7 +32,7 @@ export async function requestStoredLocations(): Promise<RemoteLocation[]> {
 }
 
 export async function createStoredLocation(location: NewRemoteLocation) {
-  const response = await fetch('/api/remote/locations', {
+  const response = await fetch('/api/locations', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -55,7 +55,7 @@ export async function createStoredLocation(location: NewRemoteLocation) {
 
 export async function updateStoredLocation(location: RemoteLocation) {
   const response = await fetch(
-    `/api/remote/locations/${encodeURIComponent(location.id)}`,
+    `/api/locations/${encodeURIComponent(location.id)}`,
     {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -76,7 +76,7 @@ export async function updateStoredLocationFavorites(
   favorites: FavoriteFolder[],
 ) {
   const response = await fetch(
-    `/api/remote/locations/${encodeURIComponent(locationId)}/favorites`,
+    `/api/locations/${encodeURIComponent(locationId)}/favorites`,
     {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -94,7 +94,7 @@ export async function updateStoredLocationFavorites(
 
 export async function deleteStoredLocation(locationId: string) {
   const response = await fetch(
-    `/api/remote/locations/${encodeURIComponent(locationId)}`,
+    `/api/locations/${encodeURIComponent(locationId)}`,
     { method: 'DELETE' },
   )
   const result = await readJson<{ error?: string }>(response)
@@ -107,16 +107,14 @@ export async function requestRemoteTree(
   location: RemoteLocation,
   path: string,
 ): Promise<{ entries: TreeEntry[]; cachePersisted: boolean }> {
-  const response = await fetch('/api/remote/tree', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      locationId: location.id,
-      url: location.url,
-      path,
-      username: location.username,
-    }),
-  })
+  const query = new URLSearchParams({ path })
+  const response = await fetch(
+    `/api/locations/${encodeURIComponent(location.id)}/tree?${query}`,
+    {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    },
+  )
   const result = await readJson<{
     entries?: TreeEntry[]
     cachePersisted?: boolean
@@ -141,17 +139,15 @@ export async function requestFileComparison(
   path: string,
   revision?: number,
 ): Promise<FileComparison> {
-  const response = await fetch('/api/remote/file', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      locationId: location.id,
-      url: location.url,
-      path,
-      username: location.username,
-      ...(revision ? { revision } : {}),
-    }),
-  })
+  const query = new URLSearchParams({ path })
+  if (revision !== undefined) query.set('revision', String(revision))
+  const response = await fetch(
+    `/api/locations/${encodeURIComponent(location.id)}/file?${query}`,
+    {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    },
+  )
   const result = await readJson<{ comparison?: FileComparison; error?: string }>(
     response,
   )
@@ -166,17 +162,17 @@ export async function requestFileHistory(
   path: string,
   beforeRevision?: number,
 ): Promise<FileHistory> {
-  const response = await fetch('/api/remote/file/history', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      locationId: location.id,
-      url: location.url,
-      path,
-      username: location.username,
-      ...(beforeRevision ? { beforeRevision } : {}),
-    }),
-  })
+  const query = new URLSearchParams({ path })
+  if (beforeRevision !== undefined) {
+    query.set('beforeRevision', String(beforeRevision))
+  }
+  const response = await fetch(
+    `/api/locations/${encodeURIComponent(location.id)}/file/history?${query}`,
+    {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    },
+  )
   const result = await readJson<{ history?: FileHistory; error?: string }>(
     response,
   )
@@ -186,19 +182,14 @@ export async function requestFileHistory(
   return result.history
 }
 
-export async function requestPersistentTreeCache(
-  location: RemoteLocation,
-  username: string,
-) {
-  const response = await fetch('/api/remote/cache/read', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      locationId: location.id,
-      url: location.url,
-      username,
-    }),
-  })
+export async function requestPersistentTreeCache(location: RemoteLocation) {
+  const response = await fetch(
+    `/api/locations/${encodeURIComponent(location.id)}/cache`,
+    {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    },
+  )
   const result = await readJson<{
     cache?: PersistentTreeCache | null
     error?: string
@@ -209,19 +200,16 @@ export async function requestPersistentTreeCache(
 
 export async function savePersistentExpandedPaths(
   location: RemoteLocation,
-  username: string,
   expandedPaths: string[],
 ) {
-  const response = await fetch('/api/remote/cache/expanded', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      locationId: location.id,
-      url: location.url,
-      username,
-      expandedPaths,
-    }),
-  })
+  const response = await fetch(
+    `/api/locations/${encodeURIComponent(location.id)}/cache/expanded`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expandedPaths }),
+    },
+  )
   if (!response.ok) {
     const result = await readJson<{ error?: string }>(response)
     throw new Error(result.error ?? '无法保存已展开目录')
@@ -230,7 +218,7 @@ export async function savePersistentExpandedPaths(
 
 export async function clearPersistentTreeCache(locationId: string) {
   const response = await fetch(
-    `/api/remote/cache/${encodeURIComponent(locationId)}`,
+    `/api/locations/${encodeURIComponent(locationId)}/cache`,
     { method: 'DELETE' },
   )
   if (!response.ok) throw new Error('无法清除后端目录缓存')
@@ -240,16 +228,11 @@ export async function invalidatePersistentTreeSubtree(
   location: RemoteLocation,
   path: string,
 ) {
-  const response = await fetch('/api/remote/cache/invalidate', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      locationId: location.id,
-      url: location.url,
-      username: location.username,
-      path,
-    }),
-  })
+  const query = new URLSearchParams({ path })
+  const response = await fetch(
+    `/api/locations/${encodeURIComponent(location.id)}/cache/entries?${query}`,
+    { method: 'DELETE' },
+  )
   const result = await readJson<{ invalidated?: number; error?: string }>(
     response,
   )
