@@ -219,6 +219,7 @@ export function FileHistory({
   const isDirectory = entry.kind === 'directory'
   const entrySubject = isDirectory ? '文件夹' : '文件'
   const initialRevision = useRef(revision)
+  const revisionListRef = useRef<HTMLDivElement>(null)
   const [history, setHistory] = useState<FileHistoryData | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [isHistoryLoading, setIsHistoryLoading] = useState(true)
@@ -285,6 +286,16 @@ export function FileHistory({
       cancelled = true
     }
   }, [entry.path, entrySubject, historyRequestVersion, location])
+
+  useEffect(() => {
+    if (!revision) return
+
+    revisionListRef.current
+      ?.querySelector<HTMLButtonElement>(
+        `.history-revision-summary[data-revision="${revision}"]`,
+      )
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [history, revision])
 
   const selectedRevisionEntry = useMemo(
     () =>
@@ -734,6 +745,7 @@ export function FileHistory({
           ) : history?.entries.length ? (
             <div
               className="history-revision-list"
+              ref={revisionListRef}
               onPointerOver={handleMarqueePointerOver}
               onPointerOut={handleMarqueePointerOut}
             >
@@ -753,6 +765,7 @@ export function FileHistory({
                   >
                     <button
                       className="history-revision-summary"
+                      data-revision={revision.revision}
                       type="button"
                       onClick={() => selectRevision(revision)}
                       aria-expanded={isExpanded}
